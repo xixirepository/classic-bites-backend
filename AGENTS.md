@@ -4,9 +4,10 @@
 
 이 저장소는 고전한입의 Python FastAPI, MySQL, MinIO 및 Docker Compose 구성을 관리합니다. iOS 앱은 별도 저장소입니다. 설치·검증된 내용과 미구현 기능을 구분하며, 요청 없이 프런트엔드나 새로운 서비스 기술을 추가하지 않습니다.
 
-- `api/`: FastAPI 앱, MinIO 파일 CRUD, 업로드 제한, API 이미지.
+- `api/`: FastAPI 앱, 회원 인증·세션, MinIO 파일 CRUD, 요청 제한, API 이미지와 인증 스키마.
 - `minio/`: MinIO 이미지와 전용 파일 접근 정책.
-- `scripts/`: 환경 초기화, 접근 권한 설정, 연결·CRUD·자원 처리 검사.
+- `scripts/`: 환경 초기화, 접근 권한 설정, 연결·CRUD·자원 처리·인증 검사.
+- `docs/auth-api.md`, `docs/ios-auth-integration-prompt.md`: 인증 계약·Google 설정과 UI 연결 요청문.
 - `compose.yaml`, `stack.sh`: 설치·실행·중지와 데이터 볼륨 구성.
 - `.env.example`: 실제 비밀정보가 없는 설정 예시.
 - `README.md`: 실제 설치 상태, 사용법, 검증 기록과 미정 사항.
@@ -32,6 +33,8 @@
 ## 검증과 결과 보고
 
 변경 범위에 맞는 검증을 실행합니다. 서버의 서비스 통합 검사는 `./stack.sh check`이며 임시 검사 데이터를 생성하고 정리합니다. 자세한 실행 환경과 내용은 README를 확인합니다. 문서나 Git 정리만 바뀌었다면 무관한 서비스 재시작이나 재배포를 하지 않습니다.
+
+인증 변경은 `api/requirements-test.txt`를 설치한 Python 3.13 환경에서 `scripts/check-auth.py`를 실행하고, 스키마·트랜잭션 변경에는 `scripts/check-auth-mysql.py`의 독립된 임시 MySQL 검사도 실행합니다. 이 검사는 기존 서버나 볼륨을 사용하지 않으며 로컬 `mysql:8.4` 이미지와 Docker가 필요합니다. 실제 Google 계정·HTTPS·iOS 연결 검증과 구분합니다. 자세한 명령은 README의 인증 절을 따릅니다.
 
 각 대상 저장소에서 `git diff --check`, `git status --short`를 확인하고 스테이징이 있으면 `git diff --cached --check`도 확인합니다. 필요한 검증을 실행하지 못하면 이유를 밝힙니다.
 

@@ -64,7 +64,7 @@ services:
     <<: *common
     build:
       context: ./api
-    image: classic-bites-fastapi:1.1.0
+    image: classic-bites-fastapi:1.2.0
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
@@ -77,6 +77,11 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Run ./stack.sh install}
       MEDIA_API_KEY: ${MEDIA_API_KEY:?Run ./stack.sh install}
       MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+      AUTH_ENABLED: ${AUTH_ENABLED:-false}
+      AUTH_RATE_LIMIT_SALT: ${AUTH_RATE_LIMIT_SALT:-}
+      AUTH_ACCESS_TTL_SECONDS: ${AUTH_ACCESS_TTL_SECONDS:-900}
+      AUTH_REFRESH_TTL_SECONDS: ${AUTH_REFRESH_TTL_SECONDS:-2592000}
+      GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
     ports:
       - "0.0.0.0:${FASTAPI_PORT:-8000}:8000"
     depends_on:
