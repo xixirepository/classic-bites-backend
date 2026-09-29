@@ -1,0 +1,7 @@
+fastapi==0.141.1
+uvicorn==0.54.0
+PyMySQL[rsa]==1.2.3
+cryptography==50.0.1
+minio==7.2.20
+python-multipart==0.0.32
+starlette==1.7.0
