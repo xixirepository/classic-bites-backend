@@ -5,3 +5,8 @@ cryptography==50.0.1
 minio==7.2.20
 python-multipart==0.0.32
 starlette==1.7.0
+argon2-cffi==25.1.0
+google-auth[requests]==2.59.0
+requests==2.34.2
+CacheControl==0.14.4
+email-validator==2.3.0

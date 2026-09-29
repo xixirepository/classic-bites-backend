@@ -7,12 +7,16 @@ import secrets
 
 SECRET_KEYS = (
     "MYSQL_PASSWORD", "MYSQL_ROOT_PASSWORD", "MINIO_ROOT_PASSWORD",
-    "MINIO_SECRET_KEY", "MEDIA_API_KEY",
+    "MINIO_SECRET_KEY", "MEDIA_API_KEY", "AUTH_RATE_LIMIT_SALT",
 )
-MEDIA_DEFAULTS = {
+API_DEFAULTS = {
     "MINIO_ACCESS_KEY": "classicbitesapi",
     "MINIO_BUCKET": "classic-bites-media",
     "MAX_UPLOAD_BYTES": "104857600",
+    "AUTH_ENABLED": "false",
+    "AUTH_ACCESS_TTL_SECONDS": "900",
+    "AUTH_REFRESH_TTL_SECONDS": "2592000",
+    "GOOGLE_CLIENT_IDS": "",
 }
 
 
@@ -45,17 +49,17 @@ def main():
         missing_base = [key for key in SECRET_KEYS[:3] if key not in current]
         if missing_base:
             raise SystemExit("Existing .env is missing database/root credentials; restore it before installing.")
-        additions = {key: value for key, value in MEDIA_DEFAULTS.items() if key not in current}
-        for key in ("MINIO_SECRET_KEY", "MEDIA_API_KEY"):
+        additions = {key: value for key, value in API_DEFAULTS.items() if key not in current}
+        for key in ("MINIO_SECRET_KEY", "MEDIA_API_KEY", "AUTH_RATE_LIMIT_SALT"):
             if key not in current:
                 additions[key] = secrets.token_hex(32)
         if additions:
             with path.open("a") as stream:
                 if content and not content.endswith("\n"):
                     stream.write("\n")
-                stream.write("\n# Media API credentials and settings; keep this file private.\n")
+                stream.write("\n# API credentials and settings; keep this file private.\n")
                 stream.writelines(f"{key}={value}\n" for key, value in additions.items())
-            print("Added missing media settings (mode 600); existing credentials unchanged.")
+            print("Added missing API settings (mode 600); existing credentials unchanged.")
         else:
             print("Existing .env retained (mode 600); credentials unchanged.")
         return
@@ -71,7 +75,7 @@ def main():
             content = re.sub(rf"(?m)^{key}=GENERATE_ON_INSTALL$", key + "=" + secrets.token_hex(32), content)
         elif key not in current:
             content += f"\n{key}={secrets.token_hex(32)}\n"
-    for key, value in MEDIA_DEFAULTS.items():
+    for key, value in API_DEFAULTS.items():
         if key not in current:
             content += f"{key}={value}\n"
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)

@@ -33,7 +33,7 @@ SSH 비밀번호와 서비스 비밀번호는 이 문서에 저장하지 않습�
 | `scripts/` | 설치 보조 및 연결 점검 도구 |
 | `README.md` | 이 운영 설명서 |
 
-FastAPI는 `/health`, `/ready`, `/docs`와 미디어 파일 CRUD API를 제공합니다. 회원·학습 API와 MySQL의 파일 정보 테이블은 구현하지 않았습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
+기존 배포 서버는 `/health`, `/ready`, `/docs`와 미디어 파일 CRUD API를 제공합니다. 이번 로컬 소스에는 로그인·회원가입 API를 추가했으며 배포 여부와 사용법은 [인증 기능](#11-로그인회원가입-로컬-구현)을 확인하세요. 학습 API와 MySQL의 파일 정보 테이블은 아직 없습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
 
 ### 미디어 버킷과 파일 경로
 
@@ -69,7 +69,7 @@ cd ~/classic-bites-stack
 ./stack.sh check
 ```
 
-`install`은 `.env` 초기 준비, 이미지 빌드, MySQL·MinIO 시작, 미디어 버킷·전용 계정·권한 설정, FastAPI 시작을 순서대로 처리합니다. 기존 `.env`의 비밀번호는 유지하고 새 설정만 추가합니다. 각 서비스의 정상 상태를 기다립니다. 처음 MinIO를 소스에서 빌드할 때는 시간이 걸립니다. `--wait-timeout 180`은 서비스 시작 후 대기 제한이며 전체 이미지 다운로드·빌드 시간 제한은 아닙니다.
+`install`은 `.env` 초기 준비, 이미지 빌드, MySQL·MinIO 시작, 미디어 버킷·전용 계정·권한 설정, 회원 인증 테이블 준비, FastAPI 시작을 순서대로 처리합니다. 기존 `.env`의 비밀번호는 유지하고 새 설정만 추가합니다. 각 서비스의 정상 상태를 기다립니다. 처음 MinIO를 소스에서 빌드할 때는 시간이 걸립니다. `--wait-timeout 180`은 서비스 시작 후 대기 제한이며 전체 이미지 다운로드·빌드 시간 제한은 아닙니다.
 
 대상 서버에는 Docker와 Docker Compose가 이미 설치되어 있습니다. `stack.sh install`은 이 세 서비스를 설치하는 명령이며 Docker 엔진 자체를 설치하거나 서버의 다른 Compose 프로젝트를 관리하는 명령은 아닙니다.
 
@@ -467,3 +467,74 @@ git status --short
 ```
 
 다음 기능 요청에는 원하는 API 동작, 대상 데이터·파일 범위, 완료 조건과 필요하면 선호 브랜치 이름을 적어 주세요.
+
+## 11. 로그인·회원가입 로컬 구현
+
+이메일·비밀번호 가입/로그인과 Google ID token 로그인/첫 가입을 추가했습니다. 로그인 유지, 현재 사용자 조회, access/refresh token 갱신과 로그아웃을 포함합니다. API 소스 버전은 `1.2.0`이며 위 9절의 서버 `1.1.0` 설치 기록과 다릅니다. 이번 변경은 아직 운영 서버에 배포하지 않았습니다.
+
+- [인증 API 계약과 Google Cloud 설정 안내](docs/auth-api.md): 요청·응답, 오류 코드, 서버 활성화, Google 클라이언트 생성 및 사용자 확인 항목.
+- [UI 완료 후 사용할 iOS 연결 프롬프트](docs/ios-auth-integration-prompt.md): 완성된 화면을 유지하며 인증 API·Google SDK·Keychain·세션 갱신에 연결하는 작업 요청문.
+- `api/auth.py`, `api/auth_guard.py`: 인증 API와 비밀번호 해시, Google 서명 검증, 요청 제한·오류 보호.
+- `api/auth_store.py`, `api/migrations/001_auth.sql`: MySQL 회원·세션·갱신 이력·시도 제한 저장과 트랜잭션.
+- `api/migrate_auth.py`, `api/prune_auth.py`: 인증 테이블 준비와 만료된 인증 기록의 제한된 정리.
+
+`AUTH_ENABLED`를 지정하지 않으면 프로세스와 Compose에서 인증을 비활성화합니다. `.env.example`과 `stack.sh install`도 누락된 값을 `false`로 준비하며 기존 `.env`의 값은 보존합니다. HTTPS 또는 보호된 로컬 개발 연결을 준비한 뒤 서버 `.env`에서 `AUTH_ENABLED=true`로 명시적으로 활성화합니다. 설치 스크립트는 누락된 `AUTH_RATE_LIMIT_SALT`를 난수로 추가합니다. Google 설정이 비어 있으면 활성화 후 이메일 인증만 먼저 사용할 수 있고 `/auth/google`은 `503 google_not_configured`를 반환합니다. 실제 OAuth 클라이언트 ID와 HTTPS 주소가 준비되기 전에는 실제 Google·iOS 연동을 완료했다고 판단하지 않습니다.
+
+### 서버 적용 절차
+
+다음은 소스를 대상 서버에 배포한 이후의 절차입니다. 이번 로컬 개발 중에는 실행하지 않았습니다. 기존 `.env`와 데이터 볼륨을 보존하고, 정상 백업을 확인한 뒤 적용합니다. Google 설정은 위 문서를 따라 서버의 비공개 `.env`에 입력합니다. 안전한 연결 준비 후 `AUTH_ENABLED=true`를 설정하고 `./stack.sh start`로 반영합니다.
+
+```sh
+# 소스와 이미지 변경 적용: 누락 환경 설정 추가 → 이미지 빌드 → 기반 서비스
+# 준비 → 미디어 권한 → 인증 테이블 준비 → API 시작
+./stack.sh install
+./stack.sh check
+```
+
+인증 테이블 준비만 명시적으로 실행할 때는 빌드된 새 API 이미지와 실행 중인 MySQL이 필요합니다.
+
+```sh
+docker compose run --rm --no-deps fastapi python migrate_auth.py
+```
+
+이 마이그레이션은 새 `auth_` 테이블 네 개를 만들고 기존 테이블·파일을 삭제하거나 바꾸지 않습니다. MySQL DDL은 전체 트랜잭션 롤백이 되지 않으므로 중간 실패 시 원인을 해결한 뒤 같은 명령을 재실행합니다. 준비 후 `/ready`는 `AUTH_ENABLED=true`일 때 `auth_schema`도 확인합니다. `./stack.sh check`는 기존 미디어 서비스 검사이며 회원 테스트는 아래 별도 명령을 사용합니다.
+
+인증 기록 정리는 한 번에 만료 세션과 요청 제한 기록을 각각 최대 500개 처리합니다. 회원은 삭제하지 않으며 사용한 refresh token 이력은 세션의 절대 만료 전까지 유지합니다. 예약 실행은 아직 설정하지 않았습니다.
+
+```sh
+docker compose exec -T fastapi python prune_auth.py
+```
+
+### 로컬 검증
+
+Python 3.13과 Docker, 로컬에 준비한 `mysql:8.4` 이미지가 필요합니다(`docker pull mysql:8.4`). 가상환경이 없으면 `python3.13 -m venv .venv`로 먼저 만듭니다. 첫 두 테스트는 외부 서비스·실제 Google 계정 없이 실행합니다. 마지막 테스트는 별도 임시 MySQL 컨테이너만 만들고 종료 후 정리하며 기존 서버·컨테이너·볼륨을 사용하지 않습니다.
+
+```sh
+.venv/bin/python -m pip install -r api/requirements-test.txt
+.venv/bin/python -m pip check
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-auth.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-media-limits.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-auth-mysql.py
+docker compose --env-file .env.example config --quiet
+bash -n stack.sh
+git diff --check
+```
+
+2026-09-29 로컬 검증 환경은 Python `3.13.13`, 임시 MySQL `8.4.10`입니다. 기존 배포 설정의 Python `3.13.15`·MySQL `8.4.11`과 구분합니다.
+
+| 실행한 검사 | 결과 |
+| --- | --- |
+| `scripts/check-auth.py` | 28개 통과: 인증 API, 오류 정보 보호, Google 실제 RSA 서명 검증, 권한 분리 |
+| `scripts/check-auth-mysql.py` | 11개 통과: HTTP→MySQL 흐름, 중복·동시 갱신, 만료·재사용·롤백, 스키마 반복 적용, 정리; 임시 컨테이너 제거 |
+| `scripts/check-media-limits.py` | 기존 파일 처리 11개 통과 |
+| `pip check`, 전체 Python 구문 검사 | 통과 |
+| `docker compose --env-file .env.example config --quiet`, `bash -n stack.sh` | 통과 |
+| 환경 초기화·보존 검사 | 새 비밀값 생성·파일 권한, 반복 실행과 기존 자격증명·명시 설정 보존 통과 |
+| 로컬 문서 링크, `git diff --check`, `git diff --cached --check` | 통과 |
+| `docker build -t classic-bites-auth-check:local api` | 기본 이미지 메타데이터 조회에서 진행되지 않아 중단; 새 이미지 빌드 미검증 |
+
+총 50개 자동 테스트가 통과했습니다. 테스트 도구의 `httpx` 사용에 대한 Starlette 변경 예고 경고가 있지만 실패는 아닙니다. 운영 서버 배포·실제 Google 계정·iOS 연결은 실행하지 않았습니다.
+
+인증 테스트의 Google 검증은 테스트용 RSA 키로 서명한 ID token과 테스트 인증서를 사용합니다. 실제 검증 라이브러리의 서명·발급자·대상·만료 검사를 확인하지만 실제 Google 로그인창·동의 화면·클라이언트 설정 검증을 대신하지 않습니다.
+
+남은 사용자 확인은 문서의 API와 일반/Google 가입 정책, Google Cloud 설정, HTTPS 주소와 서버 배포, 완성된 iOS UI 연결 후 실제 회원가입·로그인·자동 로그인·로그아웃입니다. 이메일 인증 메일·비밀번호 재설정·계정 연결·탈퇴는 이번 범위에 포함하지 않았습니다. 명시적인 테스트 승인 전에는 `dev`에 통합하지 않습니다.

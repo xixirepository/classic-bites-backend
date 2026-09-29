@@ -5,17 +5,27 @@ from contextlib import asynccontextmanager
 import pymysql
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.exception_handlers import request_validation_exception_handler
+
+from auth import AuthSettings, AuthService, AuthStore, router as auth_router
+from auth_guard import AuthGuardMiddleware
 
 from media import Settings, create_storage, router
 from upload_guard import MediaGuardMiddleware
 
 
-def create_app(settings: Settings | None = None, storage=None):
+def create_app(settings: Settings | None = None, storage=None, *,
+               auth_settings: AuthSettings | None = None, auth_store=None, google_verifier=None):
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         configuration = settings or Settings.from_env()
         configuration.validate()
         application.state.settings = configuration
+        auth_configuration = auth_settings or AuthSettings.from_env()
+        auth_configuration.validate()
+        application.state.auth = (AuthService(auth_configuration, auth_store or AuthStore.from_env(), google_verifier)
+                                  if auth_configuration.enabled else None)
         pool = None
         if storage is None:
             application.state.storage, pool = create_storage(configuration)
@@ -24,15 +34,38 @@ def create_app(settings: Settings | None = None, storage=None):
         try:
             yield
         finally:
+            if application.state.auth is not None:
+                application.state.auth.close()
             if pool is not None:
                 pool.clear()
 
     application = FastAPI(
-        title="Classic Bites API", version="1.1.0", lifespan=lifespan,
-        description="Private MinIO media CRUD. Use Authorize with MEDIA_API_KEY. Downloads return complete files; no video Range streaming or MySQL metadata integration is included.",
+        title="Classic Bites API", version="1.2.0", lifespan=lifespan,
+        description="Email/password and Google authentication use UserAccessToken. Media CRUD remains admin-only with MEDIA_API_KEY; user login does not grant media administration.",
     )
     application.add_middleware(MediaGuardMiddleware)
+    application.add_middleware(AuthGuardMiddleware)
     application.include_router(router)
+    application.include_router(auth_router)
+
+    @application.exception_handler(RequestValidationError)
+    async def validation_error(request: Request, exc: RequestValidationError):
+        if request.url.path.startswith("/auth/"):
+            # Pydantic inputs/context may include passwords and tokens; never reflect them.
+            return JSONResponse(status_code=422, content={"detail": {
+                "code": "validation_error", "message": "입력 내용을 확인해 주세요.",
+                "fields": [{"field": ".".join(str(part) for part in error["loc"]
+                                             if part in ("body", "email", "password", "display_name", "id_token", "refresh_token")) or "body",
+                            "type": error["type"]} for error in exc.errors()],
+            }})
+        return await request_validation_exception_handler(request, exc)
+
+    @application.exception_handler(pymysql.MySQLError)
+    async def database_error(request: Request, exc: pymysql.MySQLError):
+        # Do not expose SQL, connection details, or driver error text to clients/logs.
+        return JSONResponse(status_code=503, content={"detail": {
+            "code": "auth_unavailable", "message": "서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+        }})
 
     @application.get("/")
     def index():
@@ -67,6 +100,12 @@ def create_app(settings: Settings | None = None, storage=None):
         except Exception:
             checks["minio"] = "error"
             checks["media_bucket"] = "error"
+        if request.app.state.auth is not None:
+            try:
+                request.app.state.auth.store.check_schema()
+                checks["auth_schema"] = "ok"
+            except Exception:
+                checks["auth_schema"] = "error"
         ok = all(value == "ok" for value in checks.values())
         return JSONResponse(status_code=200 if ok else 503, content={"status": "ok" if ok else "error", "checks": checks})
 
