@@ -1,0 +1,104 @@
+name: classic-bites-stack
+
+x-common: &common
+  restart: unless-stopped
+  logging:
+    driver: json-file
+    options:
+      max-size: "10m"
+      max-file: "3"
+
+services:
+  mysql:
+    <<: *common
+    image: mysql:8.4.11
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Run ./stack.sh install}
+      MYSQL_USER: ${MYSQL_USER:?Run ./stack.sh install}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run ./stack.sh install}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Run ./stack.sh install}
+      TZ: Asia/Seoul
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_0900_ai_ci", "--innodb-buffer-pool-size=256M", "--max-connections=100"]
+    ports:
+      - "0.0.0.0:${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=\"$$MYSQL_PASSWORD\" mysql --protocol=TCP -h127.0.0.1 -u\"$$MYSQL_USER\" \"$$MYSQL_DATABASE\" --silent --execute='SELECT 1' >/dev/null"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+    stop_grace_period: 60s
+    mem_limit: 1536m
+
+  minio:
+    <<: *common
+    build:
+      context: ./minio
+    image: classic-bites-minio:RELEASE.2025-10-15T17-29-55Z
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Run ./stack.sh install}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Run ./stack.sh install}
+      MINIO_BROWSER_REDIRECT_URL: http://vpn.xixiplay.com:${MINIO_CONSOLE_PORT:-9001}
+      MINIO_UPDATE: "off"
+    command: ["server", "/data", "--address", ":9000", "--console-address", ":9001"]
+    ports:
+      - "0.0.0.0:${MINIO_API_PORT:-9000}:9000"
+      - "0.0.0.0:${MINIO_CONSOLE_PORT:-9001}:9001"
+    volumes:
+      - minio_data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--max-time", "4", "http://127.0.0.1:9000/minio/health/cluster"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    stop_grace_period: 60s
+    mem_limit: 1536m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+
+  fastapi:
+    <<: *common
+    build:
+      context: ./api
+    image: classic-bites-fastapi:1.1.0
+    environment:
+      MYSQL_HOST: mysql
+      MYSQL_PORT: "3306"
+      MYSQL_DATABASE: ${MYSQL_DATABASE:?Run ./stack.sh install}
+      MYSQL_USER: ${MYSQL_USER:?Run ./stack.sh install}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Run ./stack.sh install}
+      MINIO_ENDPOINT: http://minio:9000
+      MINIO_BUCKET: ${MINIO_BUCKET:-classic-bites-media}
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:?Run ./stack.sh install}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:?Run ./stack.sh install}
+      MEDIA_API_KEY: ${MEDIA_API_KEY:?Run ./stack.sh install}
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-104857600}
+    ports:
+      - "0.0.0.0:${FASTAPI_PORT:-8000}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/ready', timeout=8).read()"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
+    mem_limit: 512m
+    read_only: true
+    tmpfs:
+      - /tmp:size=128m,mode=1777
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  mysql_data:
+  minio_data:
