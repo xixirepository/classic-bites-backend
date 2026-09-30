@@ -13,6 +13,7 @@ case "$action" in
     docker compose up -d --wait --wait-timeout 180 mysql minio
     python3 scripts/setup-media-access.py
     docker compose run --rm --no-deps fastapi python migrate_auth.py
+    docker compose run --rm --no-deps fastapi python migrate_catalog.py
     docker compose up -d --wait --wait-timeout 180
     docker compose ps
     ;;

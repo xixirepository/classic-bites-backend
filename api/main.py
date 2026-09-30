@@ -10,13 +10,19 @@ from fastapi.exception_handlers import request_validation_exception_handler
 
 from auth import AuthSettings, AuthService, AuthStore, router as auth_router
 from auth_guard import AuthGuardMiddleware
+from catalog import CatalogSettings, router as catalog_router
+from catalog_store import CatalogStore
+from catalog_media import router as catalog_media_router
+from catalog_guard import CatalogGuardMiddleware, admin_origins_from_env
+from fastapi.middleware.cors import CORSMiddleware
 
 from media import Settings, create_storage, router
 from upload_guard import MediaGuardMiddleware
 
 
 def create_app(settings: Settings | None = None, storage=None, *,
-               auth_settings: AuthSettings | None = None, auth_store=None, google_verifier=None):
+               auth_settings: AuthSettings | None = None, auth_store=None, google_verifier=None,
+               catalog_settings: CatalogSettings | None = None, catalog_store=None):
     @asynccontextmanager
     async def lifespan(application: FastAPI):
         configuration = settings or Settings.from_env()
@@ -26,6 +32,10 @@ def create_app(settings: Settings | None = None, storage=None, *,
         auth_configuration.validate()
         application.state.auth = (AuthService(auth_configuration, auth_store or AuthStore.from_env(), google_verifier)
                                   if auth_configuration.enabled else None)
+        catalog_configuration = catalog_settings or CatalogSettings.from_env()
+        catalog_configuration.validate()
+        application.state.catalog_settings = catalog_configuration
+        application.state.catalog_store = (catalog_store or CatalogStore.from_env()) if catalog_configuration.enabled else None
         pool = None
         if storage is None:
             application.state.storage, pool = create_storage(configuration)
@@ -40,17 +50,25 @@ def create_app(settings: Settings | None = None, storage=None, *,
                 pool.clear()
 
     application = FastAPI(
-        title="Classic Bites API", version="1.2.0", lifespan=lifespan,
+        title="Classic Bites API", version="1.3.0", lifespan=lifespan,
         description="Email/password and Google authentication use UserAccessToken. Media CRUD remains admin-only with MEDIA_API_KEY; user login does not grant media administration.",
     )
     application.add_middleware(MediaGuardMiddleware)
     application.add_middleware(AuthGuardMiddleware)
+    application.add_middleware(CatalogGuardMiddleware)
+    origins = admin_origins_from_env()
+    if origins:
+        application.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=False,
+                                   allow_methods=["GET", "POST", "PUT"],
+                                   allow_headers=["Authorization", "Content-Type"])
     application.include_router(router)
     application.include_router(auth_router)
+    application.include_router(catalog_router)
+    application.include_router(catalog_media_router)
 
     @application.exception_handler(RequestValidationError)
     async def validation_error(request: Request, exc: RequestValidationError):
-        if request.url.path.startswith("/auth/"):
+        if request.url.path.startswith(("/auth/", "/admin/api/", "/catalog/")):
             # Pydantic inputs/context may include passwords and tokens; never reflect them.
             return JSONResponse(status_code=422, content={"detail": {
                 "code": "validation_error", "message": "입력 내용을 확인해 주세요.",
@@ -64,7 +82,8 @@ def create_app(settings: Settings | None = None, storage=None, *,
     async def database_error(request: Request, exc: pymysql.MySQLError):
         # Do not expose SQL, connection details, or driver error text to clients/logs.
         return JSONResponse(status_code=503, content={"detail": {
-            "code": "auth_unavailable", "message": "서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
+            "code": "catalog_unavailable" if request.url.path.startswith(("/catalog/", "/admin/api/")) else "auth_unavailable",
+            "message": "서비스에 연결할 수 없습니다. 잠시 후 다시 시도해 주세요.",
         }})
 
     @application.get("/")
@@ -106,6 +125,12 @@ def create_app(settings: Settings | None = None, storage=None, *,
                 checks["auth_schema"] = "ok"
             except Exception:
                 checks["auth_schema"] = "error"
+        if request.app.state.catalog_store is not None:
+            try:
+                request.app.state.catalog_store.check_schema()
+                checks["catalog_schema"] = "ok"
+            except Exception:
+                checks["catalog_schema"] = "error"
         ok = all(value == "ok" for value in checks.values())
         return JSONResponse(status_code=200 if ok else 503, content={"status": "ok" if ok else "error", "checks": checks})
 
