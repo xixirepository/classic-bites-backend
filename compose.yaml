@@ -64,7 +64,7 @@ services:
     <<: *common
     build:
       context: ./api
-    image: classic-bites-fastapi:1.2.0
+    image: classic-bites-fastapi:1.3.0
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"
@@ -82,6 +82,9 @@ services:
       AUTH_ACCESS_TTL_SECONDS: ${AUTH_ACCESS_TTL_SECONDS:-900}
       AUTH_REFRESH_TTL_SECONDS: ${AUTH_REFRESH_TTL_SECONDS:-2592000}
       GOOGLE_CLIENT_IDS: ${GOOGLE_CLIENT_IDS:-}
+      CATALOG_ENABLED: ${CATALOG_ENABLED:-false}
+      CATALOG_ADMIN_USER_IDS: ${CATALOG_ADMIN_USER_IDS:-}
+      CATALOG_ADMIN_ORIGINS: ${CATALOG_ADMIN_ORIGINS:-}
     ports:
       - "0.0.0.0:${FASTAPI_PORT:-8000}:8000"
     depends_on:

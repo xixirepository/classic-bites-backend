@@ -1,7 +1,7 @@
 # 고전한입 백엔드 · Classic Bites Backend
-이 저장소는 고전한입 백엔드의 소스와 Docker 운영 구성을 관리합니다. iOS 앱은 별도 `classic-bites-ios` 저장소에서 관리합니다. 작업 규칙은 [AGENTS.md](AGENTS.md)를 따릅니다.
+이 저장소는 고전한입 백엔드의 소스와 Docker 운영 구성을 관리합니다. iOS 앱은 별도 `classic-bites-ios`, 관리자 화면은 별도 [classic-bites-admin](https://github.com/xixirepository/classic-bites-admin) 저장소에서 관리합니다. 작업 규칙은 [AGENTS.md](AGENTS.md)를 따릅니다.
 
-세 서비스를 Docker Compose 프로젝트 하나로 설치하고 함께 시작·중지하는 구성입니다. 서버의 기존 서비스와 구분되는 `classic-bites-stack` 프로젝트를 사용합니다. 2026-09-30 FastAPI는 기존 nginx를 통한 `https://vpn.xixiplay.com`으로 공개하며, 호스트의 API 포트는 `127.0.0.1:8000`에만 연결합니다. MySQL·MinIO의 기존 포트 설정은 유지합니다. 초기 설치 기록과 현재 인증·HTTPS 배포 결과는 각각 9절과 11절에 있습니다.
+세 서비스를 Docker Compose 프로젝트 하나로 설치하고 함께 시작·중지하는 구성입니다. 서버의 기존 서비스와 구분되는 `classic-bites-stack` 프로젝트를 사용합니다. 2026-09-30 FastAPI는 기존 nginx를 통한 `https://vpn.xixiplay.com`으로 공개하며, 호스트의 API 포트는 `127.0.0.1:8000`에만 연결합니다. MySQL·MinIO의 기존 포트 설정은 유지합니다. 초기 설치 기록과 인증·HTTPS 배포 결과는 각각 9절과 11절에 있습니다. 현재 소스의 API `1.3.0` 서재·관리 API 구현과 로컬 검증은 12절에 있으며, 운영 서버에 마지막으로 확인한 배포 버전 `1.2.0`과 구분합니다.
 
 ## 1. 설치 위치와 구성
 
@@ -30,12 +30,14 @@ SSH 비밀번호와 서비스 비밀번호는 이 문서에 저장하지 않습�
 | `stack.sh` | 설치·시작·중지·상태 확인 명령 |
 | `.env` | 서버에서 생성하는 실제 비밀번호와 환경 설정 |
 | `.env.example` | 비밀번호를 포함하지 않는 설정 예시 |
-| `api/` | Python FastAPI 시작 앱과 Docker 빌드 파일 |
+| `api/` | FastAPI 앱, 인증·서재·콘텐츠 관리·표지 API와 Docker 빌드 파일 |
+| `api/migrations/` | 기존 데이터를 보존하는 인증·서재 추가 스키마 |
+| `docs/catalog-api.md` | iOS·독립 admin이 공유하는 콘텐츠 API 계약 |
 | `minio/` | 고정된 MinIO 소스를 빌드하는 Docker 파일 |
 | `scripts/` | 설치 보조 및 연결 점검 도구 |
 | `README.md` | 이 운영 설명서 |
 
-현재 배포 서버의 API 버전은 `1.2.0`이며 `/health`, `/ready`, `/docs`, 미디어 파일 CRUD와 로그인·회원가입 API를 제공합니다. 인증은 활성화했고 사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 설정·검증 결과는 [인증 기능](#11-로그인회원가입과-https-배포)을 확인하세요. 학습 API와 MySQL의 파일 정보 테이블은 아직 없습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
+현재 배포 서버의 API 버전은 `1.2.0`이며 `/health`, `/ready`, `/docs`, 미디어 파일 CRUD와 로그인·회원가입 API를 제공합니다. 인증은 활성화했고 사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 설정·검증 결과는 [인증 기능](#11-로그인회원가입과-https-배포)을 확인하세요. 현재 소스의 `1.3.0`에는 책·작품·장·한입의 공개 조회와 관리자 등록·수정·공개 및 표지 업로드 API를 추가했습니다. 이 신규 기능의 운영 서버 배포는 아직 수행하지 않았으며, 학습 기록 저장과 범용 MySQL 파일 정보 테이블도 없습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
 
 ### 미디어 버킷과 파일 경로
 
@@ -71,7 +73,7 @@ cd ~/classic-bites-stack
 ./stack.sh check
 ```
 
-`install`은 `.env` 초기 준비, 이미지 빌드, MySQL·MinIO 시작, 미디어 버킷·전용 계정·권한 설정, 회원 인증 테이블 준비, FastAPI 시작을 순서대로 처리합니다. 기존 `.env`의 비밀번호는 유지하고 새 설정만 추가합니다. 각 서비스의 정상 상태를 기다립니다. 처음 MinIO를 소스에서 빌드할 때는 시간이 걸립니다. `--wait-timeout 180`은 서비스 시작 후 대기 제한이며 전체 이미지 다운로드·빌드 시간 제한은 아닙니다.
+`install`은 `.env` 초기 준비, 이미지 빌드, MySQL·MinIO 시작, 미디어 버킷·전용 계정·권한 설정, 회원 인증·서재 테이블 준비, FastAPI 시작을 순서대로 처리합니다. `install`은 콘텐츠를 자동 등록하지 않으며 사서오경 제목 seed는 12절의 선택 명령으로만 실행합니다. 기존 `.env`의 비밀번호는 유지하고 새 설정만 추가합니다. 각 서비스의 정상 상태를 기다립니다. 처음 MinIO를 소스에서 빌드할 때는 시간이 걸립니다. `--wait-timeout 180`은 서비스 시작 후 대기 제한이며 전체 이미지 다운로드·빌드 시간 제한은 아닙니다.
 
 대상 서버에는 Docker와 Docker Compose가 이미 설치되어 있습니다. `stack.sh install`은 이 세 서비스를 설치하는 명령이며 Docker 엔진 자체를 설치하거나 서버의 다른 Compose 프로젝트를 관리하는 명령은 아닙니다.
 
@@ -591,3 +593,100 @@ git diff --check
 사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 에이전트가 검증한 서버 상태·잘못된 인증 정보 거부와 사용자가 확인한 실제 계정 로그인을 구분합니다. 첫 가입 여부·재로그인·앱 재실행 후 세션 복구·로그아웃의 추가 확인은 남아 있습니다.
 
 사용자는 이번 Google 로그인 수정의 실기기 테스트 통과를 확인했습니다. 일반/Google 가입 정책, 회원가입·자동 로그인·로그아웃의 추가 확인은 남아 있습니다. 이메일 인증 메일·비밀번호 재설정·계정 연결·탈퇴는 이번 범위에 포함하지 않았습니다. push는 사용자가 직접 수행합니다.
+
+
+## 12. 서재·콘텐츠 관리 API와 독립 admin
+
+현재 작업 소스의 API·이미지 버전은 `1.3.0`입니다. 공개 서재와 콘텐츠 관리 API를 구현하고 로컬에서 검증했으며, 위 11절의 운영 서버 `1.2.0` 배포 기록을 신규 기능 배포 완료로 해석하지 않습니다. 관리자 화면은 별도 [classic-bites-admin](https://github.com/xixirepository/classic-bites-admin) 저장소이며 로컬 경로는 `/Users/sean/xcode/classic-bites-admin`입니다. 해당 프로젝트의 실행 방법은 그 저장소 README를 따릅니다. 이 백엔드는 `/admin/api` 데이터 API를 제공하며, 관리자 화면의 소스·서버·운영 주소는 별도로 관리합니다.
+
+서재에는 사서오경을 한 권으로 표시하고 대학·중용·논어·맹자·시경·서경·역경·예기·춘추는 그 안의 작품으로 둡니다. 다른 책도 관리자에서 추가할 수 있습니다. 책은 작품을 통해 장으로 이동하거나 작품 구분 없이 직접 장을 가질 수 있습니다. 장 안의 한입에는 원문·한국어 번역·해설을 저장합니다. 새로 공개한 책과 내용은 iOS가 다음에 조회할 때 반영되며 제목별 고정 목록을 서버 계약으로 사용하지 않습니다.
+
+- [서재·콘텐츠 API 계약](docs/catalog-api.md): 경로·모델·필드 제한·정렬·공개 정책·오류·표지·마이그레이션.
+- `api/catalog.py`, `api/catalog_store.py`: 게스트 조회와 관리자 입력, MySQL 영구 저장, 공개 조상 확인, 안정적인 UUID와 순서.
+- `api/catalog_media.py`, `api/catalog_guard.py`: MinIO 표지 업로드·읽기, 요청 크기·시간 제한, 캐시 방지, 별도 관리자 origin 검증.
+- `api/migrate_catalog.py`, `api/migrations/002_catalog.sql`: `catalog_books`, `catalog_works`, `catalog_chapters`, `catalog_bites` 네 테이블과 외래키·인덱스, 선택 제목 seed.
+
+### 설정과 권한
+
+| 설정 | 기본값·용도 |
+| --- | --- |
+| `CATALOG_ENABLED` | `false`. 마이그레이션 후 `true`로 명시적으로 활성화 |
+| `CATALOG_ADMIN_USER_IDS` | 빈 목록. 기존 인증 회원 UUID를 쉼표로 구분하여 관리자 지정 |
+| `CATALOG_ADMIN_ORIGINS` | 빈 목록. 독립 관리자 화면의 정확한 origin을 쉼표로 구분하여 허용 |
+
+`.env.example`·Compose·환경 초기화 스크립트는 비활성 기본값을 사용하고 기존 `.env`의 명시 설정을 보존합니다. 관리자 지정은 기존 인증으로 생성한 회원의 UUID를 서버의 비공개 설정에 넣는 방식이며, 이메일·이름·앱 플래그로 승격하지 않습니다. 관리자 API에는 `AUTH_ENABLED=true`와 유효한 기존 access token도 필요합니다. 일반 로그인 사용자와 게스트는 관리 API를 사용할 수 없습니다. `MEDIA_API_KEY` 역시 관리자 계정 인증을 대체하지 않습니다.
+
+운영 관리자 origin은 HTTPS를 사용합니다. 로컬 개발에는 `http://localhost:<port>` 또는 `http://127.0.0.1:<port>`를 허용하며 와일드카드·경로 포함 URL·원격 HTTP는 허용하지 않습니다. `CATALOG_ADMIN_ORIGINS`의 CORS 허용 여부와 실제 관리자 권한 검사는 별개입니다. 관리자 브라우저는 API 서버로 요청하며 DB·MinIO 자격증명을 받지 않습니다. 운영 관리자 주소·HTTPS 배포는 미정입니다.
+
+### 공개·준비 상태와 표지
+
+`GET /catalog/books`부터 책·작품·장·한입 상세까지 게스트로 조회할 수 있습니다. 공개 목록과 직접 ID 조회 모두 모든 상위 항목의 공개 상태를 확인합니다. 비공개 책의 하위 본문·표지도 404로 차단합니다. 목록 순서는 `sort_order`, 같은 순서에서는 UUID로 정렬합니다.
+
+초안 저장과 공개·공개 취소를 구분합니다. 준비된 본문이 없는 공개 책·작품·장도 탐색할 수 있으며, `is_ready`는 실제 읽을 텍스트가 있는 공개 한입의 존재로 서버가 계산합니다. 본문이 비어 있는 공개 한입의 상세 조회는 `409 content_preparing`입니다. 공개 취소 후 다음 요청부터 보이지 않도록 콘텐츠·표지·오류 응답에 `no-store`를 적용합니다. 이미 받은 화면 내용을 원격에서 삭제하는 실시간 푸시는 포함하지 않습니다.
+
+책·작품 표지는 관리자 인증 후 PNG·JPEG·WebP 시그니처를 확인하고 5 MiB 이하 파일을 기존 MinIO 비공개 버킷의 `images/catalog/`에 저장합니다. 공개용 표지 API는 다시 공개 상태를 검사하여 바이트를 제공합니다. MinIO 키나 미디어 관리 비밀키를 iOS에 전달하지 않습니다. 기존 표지를 교체해도 이전 객체를 자동 삭제하지 않으며, DB 연결 실패 뒤 남은 객체의 정리는 별도 운영 항목입니다.
+
+### 기존 서버 적용 절차
+
+아래는 적용 방법이며 이번 작업에서 운영 서버에 실행한 기록이 아닙니다. 위 11절의 기존 `.env`·소스·DB·이미지 백업, 정확한 프록시 IP·HTTPS 오버레이·기존 서비스 보존 절차를 함께 따릅니다. 서버의 기존 정상 MySQL·MinIO·nginx를 재생성하지 않고 FastAPI만 갱신합니다.
+
+1. 추적하는 새 소스를 서버에 준비하고 `python3 scripts/init-env.py`로 누락 설정만 추가합니다. 기존 자격증명·인증 활성값·프록시 설정을 유지하며 서재는 준비가 끝날 때까지 비활성으로 둡니다.
+2. 아래 명령으로 설정을 검사하고 API 이미지를 빌드한 뒤 추가 테이블을 준비합니다. 기존 앱 DB 계정에는 스키마 준비에 필요한 `CREATE`·`REFERENCES`와 콘텐츠 읽기·쓰기 권한이 있어야 합니다. 권한 문제를 계정 재생성이나 볼륨 초기화로 해결하지 않습니다.
+
+```sh
+docker compose config --quiet
+docker compose build fastapi
+docker compose run --rm --no-deps fastapi python migrate_catalog.py
+
+# 선택 실행: 사서오경 한 권과 내부 작품 아홉 개의 제목만 공개합니다.
+docker compose run --rm --no-deps fastapi python migrate_catalog.py --seed-classics
+```
+
+마이그레이션은 추가 테이블만 만들고 기존 인증 데이터·미디어 파일을 변경하지 않습니다. 반복 실행 시 기존 행을 덮어쓰지 않습니다. 선택 seed에도 본문·임의 번역·검증용 한입을 포함하지 않으며, 재실행해도 관리자가 수정한 제목·순서·공개 상태를 보존합니다. MySQL DDL은 전체 롤백되지 않으므로 실패 시 원인을 고친 뒤 같은 명령을 재실행합니다. `stack.sh install`은 인증·서재 마이그레이션을 실행하지만 seed는 실행하지 않습니다.
+
+3. 서버의 비공개 `.env`에 실제 관리자 UUID·확정한 관리자 origin을 지정하고 `CATALOG_ENABLED=true`로 활성화합니다. 기존 `AUTH_ENABLED=true`와 인증 설정을 보존합니다.
+4. FastAPI만 적용한 뒤 HTTPS 연결과 공개·관리 API를 확인합니다.
+
+```sh
+docker compose up -d --no-deps --wait --wait-timeout 180 fastapi
+docker compose port fastapi 8000
+```
+
+호스트 바인딩이 기존 HTTPS 구성의 `127.0.0.1`인지 확인하고, `/health`·`/ready`에서 `catalog_schema=ok`와 기존 의존 서비스 정상 상태를 확인합니다. OpenAPI `1.3.0`·공개 목록·관리자 로그인·일반 회원의 관리 요청 거부·공개 취소를 검증합니다. `./stack.sh check`는 기존 DB·미디어 검증이며 관리자→iOS 콘텐츠 확인을 대체하지 않습니다. 문제 발생 시 우선 `CATALOG_ENABLED=false`로 신규 API를 중지하고 FastAPI만 다시 적용하며 기존 테이블·볼륨·인증 정보를 보존합니다.
+
+### 로컬 자동 검증과 연동 확인
+
+기존 Python 3.13 가상환경에 `api/requirements-test.txt`를 설치합니다. MySQL 검사는 로컬에 준비한 `mysql:8.4` 이미지와 Docker가 필요하며, 기존 서버·환경 파일·볼륨 대신 독립된 임시 컨테이너를 사용하고 종료 후 제거합니다.
+
+```sh
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog-media.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog-mysql.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-auth.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-auth-mysql.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-media-limits.py
+docker compose --env-file .env.example config --quiet
+bash -n stack.sh
+git diff --check
+```
+
+2026-09-30 이번 소스에서 실행한 결과입니다. 독립 MySQL 검사 버전 `8.4.10`은 배포 구성의 `8.4.11`과 구분합니다.
+
+| 실행한 검사 | 결과 |
+| --- | --- |
+| `scripts/check-catalog.py` | 8개 통과: 공개 계약, 관리자 권한, 초안·입력·준비중·실패 처리 |
+| `scripts/check-catalog-media.py` | 7개 통과: 업로드 파싱 이전 권한 검사, 크기·형식 제한, 공개 취소·누락 표지, 스트림 정리, 오류 캐시 방지·CORS; 가짜 저장소 사용 |
+| `scripts/check-catalog-mysql.py` | 9개 통과: 실제 MySQL 저장·재연결, 계층·외래키·정렬·변경 실패 보존, 모든 공개 조상 검사, 실제 인증 HTTP 흐름, 반복 마이그레이션·seed 보존; 임시 컨테이너 제거 |
+| `scripts/check-auth.py` | 기존 인증 회귀 28개 통과 |
+| `scripts/check-auth-mysql.py` | 기존 실제 MySQL 인증 회귀 11개 통과; 임시 컨테이너 제거 |
+| `scripts/check-media-limits.py` | 기존 미디어 자원 처리 11개 통과 |
+| Compose 설정·셸 구문 | `docker compose --env-file .env.example config --quiet`, `bash -n stack.sh` 통과 |
+| 별도 로컬 MySQL·MinIO·API 기동 | `/ready` 정상 상태 확인 |
+| 독립 admin 브라우저→실제 로컬 API·MySQL | 로그인 후 사서오경→대학 아래 검증용 장·한입 생성과 원문·번역·해설 저장 확인 |
+| FastAPI 이미지 | `docker build -t classic-bites-fastapi:1.3.0 api` 성공 |
+| 관리자→iOS 시뮬레이터 | 실제 관리자 입력 원문·번역·해설 표시, 새 책 공개 후 앱 재빌드 없이 서재 재진입으로 반영 |
+| 실제 MinIO 표지·비공개 | 관리자 화면에서 표지 업로드·교체, 실제 바이트 일치·iOS 재진입 갱신, 상위 책 비공개 후 장·한입·표지 직접 조회 404 및 앱 접근 차단·목록 제거 확인 |
+
+신규 24개와 기존 50개로 총 74개 자동 검사를 통과했습니다. API·표지의 모의 저장소 검사, 독립 실제 MySQL 검사, 별도 로컬 MySQL·MinIO와 관리자→iOS 시뮬레이터 연결 확인은 서로 다른 검증입니다. 로컬 연결은 임시 전용 계정·데이터를 사용했으며 운영 데이터에 접속하지 않았습니다. 비공개 전환은 실제 관리 API로 실행하고 iOS에서 직접 진입 차단·서재 재조회 결과를 확인했습니다. Chrome에서는 관리자 공개 전환 확인창의 Escape 취소·키보드 승인과 실제 저장을 확인했습니다. iOS에서는 화면 재진입 갱신을 직접 확인했고, 당겨서 새로고침 제스처의 직접 조작은 남아 있습니다. 운영 서버 신규 기능 배포·실제 관리자 계정 지정·관리자 HTTPS 배포·사용자 실기기 테스트는 남아 있습니다. 학습 기록 저장·결제·본문 저작·Android·사용자용 웹은 이번 범위에 포함하지 않습니다.
+
+사용자 확인은 관리자에서 책·내부 작품·장·한입을 등록하고 공개한 뒤 iOS 새로고침으로 목록과 본문을 확인하는 순서입니다. 제목·정렬·본문·표지 수정 반영, 비공개 시 목록과 직접 조회 차단, 빈 서재·통신 실패·누락 표지 안내, 기존 Google 로그인·게스트 둘러보기도 확인합니다. 자동 검증 성공은 사용자 테스트 승인과 구분하며, 승인 전 통합용 rebase·squash·dev 병합을 하지 않습니다. push는 사용자가 직접 수행합니다.
