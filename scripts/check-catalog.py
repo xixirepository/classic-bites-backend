@@ -20,6 +20,8 @@ from catalog_store import CatalogConflict, CatalogNotFound
 ADMIN_ID = str(uuid.uuid4())
 BOOK_ID = str(uuid.uuid4())
 BITE_ID = str(uuid.uuid4())
+WORK_ID = str(uuid.uuid4())
+CHAPTER_ID = str(uuid.uuid4())
 
 
 def user(user_id):
@@ -40,13 +42,29 @@ class RecordingStore:
 
     def get_detail(self, kind, item_id, public=True):
         self.public_calls.append(public)
-        if item_id not in (BOOK_ID, BITE_ID):
+        if item_id not in (BOOK_ID, BITE_ID, WORK_ID, CHAPTER_ID):
             raise CatalogNotFound()
         if kind == "bites":
             return {"bite": {"id": BITE_ID, "title": "Test", "chapter_id": BOOK_ID,
-                             "original": "", "translation": "", "commentary": "", "sort_order": 0,
+                             "original": "", "pinyin": "míng", "translation": "", "commentary": "", "sort_order": 0,
                              "is_ready": self.ready, "is_published": True}}
+        if kind == "works":
+            return {"work": {**self.list_books(public)[0], "id": WORK_ID, "book_id": BOOK_ID,
+                             "title_hanzi": "大學", "title_pinyin": "Dà Xué", "source_edition": "Test edition",
+                             "source_url": "https://example.com/source", "pinyin_source": "Test only",
+                             "review_status": "draft"}, "chapters": []}
+        if kind == "chapters":
+            return {"chapter": {"id": CHAPTER_ID, "book_id": BOOK_ID, "work_id": WORK_ID,
+                                "title": "Test", "title_hanzi": "一", "title_pinyin": "Yī", "sort_order": 0,
+                                "is_ready": self.ready, "is_published": True},
+                    "bites": [self.get_detail("bites", BITE_ID, public)["bite"]]}
         return {"book": self.list_books(public)[0], "works": [], "chapters": []}
+
+    def get_work_reader(self, item_id):
+        if item_id != WORK_ID:
+            raise CatalogNotFound()
+        return {"work": self.get_detail("works", item_id)["work"],
+                "chapters": [self.get_detail("chapters", CHAPTER_ID)]}
 
     def save(self, kind, data, item_id=None):
         self.saved = (kind, data, item_id)
@@ -137,6 +155,55 @@ class CatalogHTTPTests(unittest.TestCase):
                 CatalogSettings.from_env()
         with patch.dict("os.environ", {}, clear=True):
             self.assertFalse(CatalogSettings.from_env().enabled)
+
+    def test_reader_keeps_tone_marks_and_hides_all_management_fields(self):
+        response = self.client.get(f"/catalog/works/{WORK_ID}/reader")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers["cache-control"], "no-store")
+        result = response.json()
+        self.assertEqual(result["work"]["title_hanzi"], "大學")
+        self.assertEqual(result["work"]["title_pinyin"], "Dà Xué")
+        chapter = result["chapters"][0]
+        self.assertEqual(chapter["chapter"]["title_pinyin"], "Yī")
+        self.assertEqual(chapter["bites"][0]["pinyin"], "míng")
+        for row in (result["work"], chapter["chapter"], chapter["bites"][0]):
+            for field in ("is_published", "cover_key", "source_edition", "source_url", "pinyin_source", "review_status"):
+                self.assertNotIn(field, row)
+        self.assertTrue(all(self.store.public_calls))
+        summary = self.client.get(f"/catalog/chapters/{CHAPTER_ID}").json()["bites"][0]
+        self.assertNotIn("pinyin", summary)
+
+    def test_reader_preparing_unknown_and_disabled_responses(self):
+        result = self.client.get(f"/catalog/works/{WORK_ID}/reader")
+        self.assertEqual(result.status_code, 200)
+        self.assertFalse(result.json()["work"]["is_ready"])
+        self.assertFalse(result.json()["chapters"][0]["bites"][0]["is_ready"])
+        self.assertEqual(self.client.get(f"/catalog/works/{uuid.uuid4()}/reader").status_code, 404)
+        self.app.state.catalog_settings = CatalogSettings(False)
+        self.assertEqual(self.client.get(f"/catalog/works/{WORK_ID}/reader").status_code, 503)
+
+    def test_reading_metadata_and_pinyin_validate_and_preserve_existing_content(self):
+        self.authorize()
+        data = {"title": "대학", "book_id": BOOK_ID, "title_hanzi": " 大學 ", "title_pinyin": " Dà Xué ",
+                "source_edition": " Test edition ", "source_url": " https://example.com/source ",
+                "pinyin_source": " Test only ", "review_status": "reviewed"}
+        response = self.client.put(f"/admin/api/works/{WORK_ID}", json=data)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.store.saved[1]["title_pinyin"], "Dà Xué")
+        self.assertEqual(self.store.saved[1]["source_edition"], "Test edition")
+        self.assertIn("review_status", response.json()["work"])
+        for field, invalid in (("title_hanzi", "a\nb"), ("title_pinyin", "x" * 201),
+                               ("source_edition", "x" * 1001), ("source_url", "x" * 2049),
+                               ("pinyin_source", "x" * 2001), ("review_status", "verified")):
+            with self.subTest(field=field):
+                self.assertEqual(self.client.put(f"/admin/api/works/{WORK_ID}", json={**data, field: invalid}).status_code, 422)
+        bite = {"title": "Test", "chapter_id": CHAPTER_ID, "original": " 明 ", "pinyin": " míng ",
+                "translation": "보존할 번역", "commentary": "보존할 해설"}
+        self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json=bite).status_code, 200)
+        self.assertEqual(self.store.saved[1]["pinyin"], "míng")
+        self.assertEqual(self.store.saved[1]["translation"], "보존할 번역")
+        self.assertEqual(self.store.saved[1]["commentary"], "보존할 해설")
+        self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json={**bite, "pinyin": "x" * 100001}).status_code, 422)
 
 
 if __name__ == "__main__":

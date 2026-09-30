@@ -18,9 +18,16 @@ class CatalogConflict(Exception):
 
 COLUMNS = {
     "books": ("id", "title", "description", "cover_key", "sort_order", "is_published"),
-    "works": ("id", "book_id", "title", "description", "cover_key", "sort_order", "is_published"),
-    "chapters": ("id", "book_id", "work_id", "title", "sort_order", "is_published"),
-    "bites": ("id", "chapter_id", "title", "original", "translation", "commentary", "sort_order", "is_published"),
+    "works": ("id", "book_id", "title", "title_hanzi", "title_pinyin", "description", "cover_key", "sort_order", "is_published",
+              "source_edition", "source_url", "pinyin_source", "review_status"),
+    "chapters": ("id", "book_id", "work_id", "title", "title_hanzi", "title_pinyin", "sort_order", "is_published"),
+    "bites": ("id", "chapter_id", "title", "original", "pinyin", "translation", "commentary", "sort_order", "is_published"),
+}
+READING_DEFAULTS = {
+    "works": {"title_hanzi": "", "title_pinyin": "", "source_edition": "", "source_url": "",
+              "pinyin_source": "", "review_status": "draft"},
+    "chapters": {"title_hanzi": "", "title_pinyin": ""},
+    "bites": {"pinyin": ""},
 }
 PARENTS = {"books": (), "works": ("book_id",), "chapters": ("book_id", "work_id"), "bites": ("chapter_id",)}
 # Every alias is static code, never request input. LEFT JOIN keeps direct chapters.
@@ -109,8 +116,31 @@ class CatalogStore:
                 result["bites"] = self._rows(cursor, "bites", "t.chapter_id=%s", (item_id,), public)
             return result
 
+    def get_work_reader(self, item_id):
+        """Read the entire published work within one snapshot, ordered per level."""
+        with self._transaction() as connection, connection.cursor() as cursor:
+            works = self._rows(cursor, "works", "t.id=%s", (item_id,), public=True)
+            if not works:
+                raise CatalogNotFound()
+            chapters = self._rows(cursor, "chapters", "t.work_id=%s", (item_id,), public=True)
+            bites = self._rows(cursor, "bites", "c.work_id=%s", (item_id,), public=True)
+            by_chapter = {chapter["id"]: [] for chapter in chapters}
+            for bite in bites:
+                # Reader readiness intentionally differs from the legacy general API:
+                # translation/commentary or pinyin alone cannot supply a Hanzi line.
+                bite["is_ready"] = bool(bite["original"].strip())
+                by_chapter[bite["chapter_id"]].append(bite)
+            result = []
+            for chapter in chapters:
+                rows = by_chapter[chapter["id"]]
+                chapter["is_ready"] = any(bite["is_ready"] for bite in rows)
+                result.append({"chapter": chapter, "bites": rows})
+            work = works[0]
+            work["is_ready"] = any(item["chapter"]["is_ready"] for item in result)
+            return {"work": work, "chapters": result}
+
     def save(self, kind, values, item_id=None):
-        data = dict(values)
+        data = {**READING_DEFAULTS.get(kind, {}), **values}
         data.pop("cover_key", None)  # Covers are attached only after validated storage writes.
         target_id = item_id or str(uuid.uuid4())
         try:

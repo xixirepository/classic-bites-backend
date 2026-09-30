@@ -3,6 +3,7 @@
 import argparse
 import hashlib
 from pathlib import Path
+import re
 import sys
 import uuid
 
@@ -32,8 +33,11 @@ def seed_classics(connect):
 
 
 def migrate(connect=mysql_connect_from_env, *, seed=False):
-    statements = [statement.strip() for statement in Path(__file__).with_name("migrations")
+    migrations = Path(__file__).with_name("migrations")
+    statements = [statement.strip() for statement in migrations
                   .joinpath("002_catalog.sql").read_text(encoding="utf-8").split(";") if statement.strip()]
+    additions = [statement.strip() for statement in migrations
+                 .joinpath("003_hanzi_pinyin.sql").read_text(encoding="utf-8").split(";") if statement.strip()]
     connection = connect()
     lock_name = None
     locked = False
@@ -50,6 +54,20 @@ def migrate(connect=mysql_connect_from_env, *, seed=False):
             locked = True
             for statement in statements:
                 cursor.execute(statement)
+            for statement in additions:
+                # MySQL DDL commits individually. Inspect each column under the
+                # migration lock so a partial migration can be safely resumed.
+                match = re.fullmatch(r"ALTER TABLE (catalog_[a-z]+) ADD COLUMN ([a-z_]+) .+", statement)
+                if match is None:
+                    raise RuntimeError("Unsupported additive catalogue migration")
+                table, column = match.groups()
+                cursor.execute(
+                    "SELECT 1 FROM information_schema.columns "
+                    "WHERE table_schema=%s AND table_name=%s AND column_name=%s",
+                    (database, table, column),
+                )
+                if cursor.fetchone() is None:
+                    cursor.execute(statement)
             connection.commit()
         CatalogStore(connect).check_schema()
         if seed:

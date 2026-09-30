@@ -26,12 +26,14 @@
 | --- | --- |
 | 공통 | `id: UUID 문자열`, `title: 문자열`, `sort_order: 정수`, `is_ready: 불리언` |
 | Book | 공통 + `description: 문자열`, `cover_url: 문자열 또는 null` |
-| Work | Book 필드 + `book_id: UUID 문자열` |
-| Chapter | 공통 + `book_id: UUID 문자열`, `work_id: UUID 문자열 또는 null` |
+| Work | Book 필드 + `book_id: UUID 문자열`, `title_hanzi`, `title_pinyin`: 각각 문자열 |
+| Chapter | 공통 + `book_id: UUID 문자열`, `work_id: UUID 문자열 또는 null`, `title_hanzi`, `title_pinyin`: 각각 문자열 |
 | BiteSummary | 공통 + `chapter_id: UUID 문자열` |
-| BiteDetail | BiteSummary + `original`, `translation`, `commentary`: 각각 문자열 |
+| BiteDetail | BiteSummary + `original`, `pinyin`, `translation`, `commentary`: 각각 문자열 |
 
 공개 응답에는 `is_published`와 MinIO `cover_key`를 포함하지 않는다. 관리자 응답에는 `is_published`가 추가되고 Book·Work에는 내부 관리용 `cover_key`도 포함한다. 한입 목록은 관리자에서도 본문을 제외한 요약이며 편집 시 한입 상세를 조회한다.
+
+관리자 Work에는 `source_edition`, `source_url`, `pinyin_source`, `review_status`도 포함하며 관리자 책 상세의 works 목록에도 동일하게 제공한다. 공개 API에서는 이 네 관리 필드를 제외한다. 한자·병음 제목과 병음은 아직 등록하지 않았으면 빈 문자열이며 null은 사용하지 않는다.
 
 `cover_url`은 API 서버 기준 절대 경로다. 예: `/catalog/books/<book-id>/cover`. iOS와 별도 admin 호스트는 **API 서버 origin**으로 해석해야 한다. 임의 외부 URL이나 MinIO 주소를 노출하지 않는다. 표지가 없으면 null이고, 저장소에서 파일이 사라졌거나 읽기가 실패하면 표지 요청이 실패한다. 클라이언트는 책 탐색을 유지하며 기본 표지를 표시한다.
 
@@ -44,10 +46,19 @@
 | `GET /catalog/books` | `{ "items": [Book] }` |
 | `GET /catalog/books/{id}` | `{ "book": Book, "works": [Work], "chapters": [Chapter] }` |
 | `GET /catalog/works/{id}` | `{ "work": Work, "chapters": [Chapter] }` |
+| `GET /catalog/works/{id}/reader` | `{ "work": Work, "chapters": [{ "chapter": Chapter, "bites": [BiteDetail] }] }` |
 | `GET /catalog/chapters/{id}` | `{ "chapter": Chapter, "bites": [BiteSummary] }` |
 | `GET /catalog/bites/{id}` | `{ "bite": BiteDetail }` |
 | `GET /catalog/books/{id}/cover` | PNG·JPEG·WebP 바이트 |
 | `GET /catalog/works/{id}/cover` | PNG·JPEG·WebP 바이트 |
+
+### 한자·병음 reader
+
+reader는 작품 선택 후 장마다 본문을 따로 요청할 필요 없이 공개 장·한입을 한 응답으로 제공한다. 작품·장·한입의 모든 상위 공개 상태와 동일한 DB 읽기 스냅샷을 사용하며, 장과 각 장의 한입은 각각 `sort_order`, `id` 순서다. 작품 이름에 따른 하드코딩은 없다.
+
+reader 안의 `is_ready`만 원문 기준이다. `original.strip()`이 비어 있지 않은 공개 한입을 준비 완료로 판단하며 작품·장은 그런 하위 한입의 존재로 계산한다. 병음·번역·해설만 있는 한입은 false이고 빈 장·빈 작품도 HTTP 200으로 준비 상태를 반환한다. 원문이 있는데 병음이 비어 있으면 원문을 표시하고 병음 준비 상태를 안내할 수 있다. 기존 일반 조회의 원문·번역·해설 기준 `is_ready`와 개별 한입의 `409 content_preparing` 계약은 변경하지 않는다.
+
+앱의 학습 콘텐츠는 작품·장의 `title_hanzi`/`title_pinyin`, 한입별 `original`/`pinyin`으로 표시한다. 기존 한국어 `title`·`translation`·`commentary`는 응답과 DB에 유지하며 한자·병음의 대체 본문으로 사용하지 않는다. 병음은 중국어 보통화 성조 부호를 포함한 유니코드 문자열을 그대로 저장한다. 자동 변환·발음 검수 기능은 없고 관리자가 검수된 읽기 단위의 원문과 병음을 짝으로 등록한다.
 
 예시: 공개한 사서오경의 본문이 아직 없을 때도 목록에는 다음과 같이 나타난다. 이 UUID는 설명용 자리표시자이며 실제로는 서버 값을 사용한다.
 
@@ -90,12 +101,15 @@
 | --- | --- |
 | 모든 대상 | `title` 필수, `sort_order` 기본 0, `is_published` 기본 false |
 | books | `description` 기본 빈 문자열 |
-| works | `book_id` 필수, `description` 기본 빈 문자열 |
-| chapters | `book_id` 필수, `work_id` 기본 null |
-| bites | `chapter_id` 필수, `original`, `translation`, `commentary` 기본 빈 문자열 |
+| works | `book_id` 필수, `description`, `title_hanzi`, `title_pinyin`, `source_edition`, `source_url`, `pinyin_source` 기본 빈 문자열, `review_status` 기본 `draft` |
+| chapters | `book_id` 필수, `work_id` 기본 null, `title_hanzi`, `title_pinyin` 기본 빈 문자열 |
+| bites | `chapter_id` 필수, `original`, `pinyin`, `translation`, `commentary` 기본 빈 문자열 |
 
 - 제목은 앞뒤 공백 제거 후 1~200자이며 줄바꿈·제어문자를 허용하지 않는다.
+- 한자·병음 제목은 각각 0~200자이며 같은 공백·제어문자 규칙을 적용한다.
 - 소개는 10,000자, 각 본문 필드는 100,000자 이하이고 앞뒤 공백을 제거한다.
+- 원문 판본 `source_edition`은 1,000자, 출처 위치 `source_url`은 2,048자, 병음 출처·검수 근거 `pinyin_source`는 2,000자 이하이다. 서버가 출처를 열거나 자동 검증하지 않는다.
+- `review_status`는 `draft` 또는 `reviewed`만 받는다. `reviewed`는 원문과 병음을 모두 검수한 종합 상태이며 공개 상태와 별도다. 확인되지 않은 자료는 비공개 `draft`로 저장하고 정식 검수 콘텐츠로 등록하지 않는다.
 - `sort_order`는 -2,147,483,648~2,147,483,647의 정수다. 공개 상태는 JSON 불리언만 받는다.
 - 모든 부모 ID는 UUID여야 한다. 다른 책의 작품에 장을 연결하거나 존재하지 않는 부모를 지정하면 `409 invalid_parent`다. 생성 후 부모를 바꾸면 `409 parent_immutable`다.
 - 정의되지 않은 필드, `id`, `is_ready`, `cover_key`, `cover_url`을 일반 생성·수정 입력에 넣으면 422다. 표지는 별도 업로드 API로만 연결한다.
@@ -110,6 +124,7 @@
   "sort_order": 0,
   "is_published": false,
   "original": "",
+  "pinyin": "",
   "translation": "",
   "commentary": ""
 }
@@ -150,14 +165,14 @@
 API 이미지에 새 소스가 반영되고 MySQL이 실행 중인 환경에서:
 
 ```sh
-# 추가 테이블 네 개만 준비한다.
+# 추가 테이블 네 개와 누락된 한자·병음·출처 컬럼을 준비한다.
 docker compose run --rm --no-deps fastapi python migrate_catalog.py
 
 # 선택: 사서오경 한 권과 대학·중용·논어·맹자·시경·서경·역경·예기·춘추 제목만 공개한다.
 docker compose run --rm --no-deps fastapi python migrate_catalog.py --seed-classics
 ```
 
-마이그레이션은 같은 데이터베이스의 동시 실행을 이름 잠금으로 직렬화하고 필수 컬럼을 검사한다. 새 테이블에 기본키·외래키·정렬 인덱스를 추가한다. MySQL DDL은 전체 롤백되지 않으므로 중간 실패 시 원인을 고친 뒤 같은 명령을 재실행한다. 기존 auth 테이블과 미디어 객체를 변경하지 않는다.
+마이그레이션은 같은 데이터베이스의 동시 실행을 이름 잠금으로 직렬화하고 필수 컬럼을 검사한다. `002_catalog.sql`로 새 테이블의 기본키·외래키·정렬 인덱스를 준비하고 `003_hanzi_pinyin.sql`의 누락 컬럼을 추가한다. 기존 행의 새 문자열은 빈 값, 검수 상태는 `draft`가 되며 원문·번역·해설·제목·공개 상태는 보존한다. 적용 계정에 `ALTER` 권한이 필요하다. MySQL DDL은 전체 롤백되지 않으므로 중간 실패 시 원인을 고친 뒤 같은 명령을 재실행한다. 각 컬럼의 존재를 확인하므로 이미 추가된 컬럼은 다시 만들지 않는다. 기존 auth 테이블과 미디어 객체를 변경하지 않는다.
 
 선택 seed는 고정된 UUID로 같은 항목을 반복 생성하지 않으며, 이미 등록한 항목의 제목·순서·공개 상태를 덮어쓰지 않는다. 본문·장·한입이나 임의 번역을 추가하지 않는다. 운영 백업·배포·환경 설정·관리자 지정은 별도 실제 적용 단계다. 로컬 테스트 통과를 운영 서버 적용으로 표현하지 않는다.
 
@@ -171,4 +186,4 @@ PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog-media.py
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog-mysql.py
 ```
 
-2026-09-30 로컬 검증: HTTP 계약·권한 8개, 표지·응답 보호·CORS 7개, MySQL 8.4.10의 실제 영구 저장·HTTP 인증 흐름·공개 계층·외래키·롤백·정렬·마이그레이션/seed 반복 검증 9개 통과. MySQL 재연결 후 데이터 보존도 확인했다. 표지 테스트는 가짜 저장소를 사용하며 실제 MinIO 통합·관리자 브라우저·실기기 검증 결과는 README의 별도 기록을 따른다. Starlette의 httpx 변경 예고 경고는 기존 테스트 환경에서도 발생하며 실패는 아니다.
+2026-09-30 한자·병음 변경 로컬 검증: HTTP 계약·권한 11개, 표지·응답 보호·CORS 7개, 실제 MySQL 8.4.10 저장·HTTP 인증 흐름·공개 계층·외래키·롤백·정렬·마이그레이션/seed 반복 검증 14개 통과. 기존 스키마에서 추가 컬럼 업그레이드, 장문·성조 병음 재연결 보존, 원문 기준 reader 준비 상태, 동시 공개 취소 중 동일 스냅샷도 확인했다. 표지 테스트는 가짜 저장소를 사용하며 실제 MinIO 통합·관리자 브라우저·실기기 검증 결과는 README의 별도 기록을 따른다. 운영 서버는 `1.3.0`이며 이번 확장은 배포하지 않았다. Starlette의 httpx 변경 예고 경고는 기존 테스트 환경에서도 발생하며 실패는 아니다.

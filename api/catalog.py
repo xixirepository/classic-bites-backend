@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 import os
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, Response
@@ -57,20 +58,44 @@ class BookInput(EntityInput):
 
 class WorkInput(BookInput):
     book_id: UUID
+    title_hanzi: str = Field(default="", max_length=200)
+    title_pinyin: str = Field(default="", max_length=200)
+    source_edition: str = Field(default="", max_length=1000)
+    source_url: str = Field(default="", max_length=2048)
+    pinyin_source: str = Field(default="", max_length=2000)
+    review_status: Literal["draft", "reviewed"] = "draft"
+
+    @field_validator("title_hanzi", "title_pinyin", mode="before")
+    @classmethod
+    def reading_title(cls, value):
+        return cls.title_text(value)
+
+    @field_validator("source_edition", "source_url", "pinyin_source", mode="before")
+    @classmethod
+    def source_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
 
 
 class ChapterInput(EntityInput):
     book_id: UUID
     work_id: UUID | None = None
+    title_hanzi: str = Field(default="", max_length=200)
+    title_pinyin: str = Field(default="", max_length=200)
+
+    @field_validator("title_hanzi", "title_pinyin", mode="before")
+    @classmethod
+    def reading_title(cls, value):
+        return cls.title_text(value)
 
 
 class BiteInput(EntityInput):
     chapter_id: UUID
     original: str = Field(default="", max_length=100000)
+    pinyin: str = Field(default="", max_length=100000)
     translation: str = Field(default="", max_length=100000)
     commentary: str = Field(default="", max_length=100000)
 
-    @field_validator("original", "translation", "commentary", mode="before")
+    @field_validator("original", "pinyin", "translation", "commentary", mode="before")
     @classmethod
     def body_text(cls, value):
         return value.strip() if isinstance(value, str) else value
@@ -98,8 +123,10 @@ def serialize_entity(entity, kind, public=True, summary=False):
     if public:
         result.pop("is_published", None)
         result.pop("cover_key", None)
+        for field in ("source_edition", "source_url", "pinyin_source", "review_status"):
+            result.pop(field, None)
     if summary:
-        for field in ("original", "translation", "commentary"):
+        for field in ("original", "pinyin", "translation", "commentary"):
             result.pop(field, None)
     return result
 
@@ -149,6 +176,22 @@ def book(item_id: UUID, store=Depends(catalog_store)):
 @router.get("/catalog/works/{item_id}")
 def work(item_id: UUID, store=Depends(catalog_store)):
     return detail(store, "works", item_id, True)
+
+
+@router.get("/catalog/works/{item_id}/reader")
+def work_reader(item_id: UUID, store=Depends(catalog_store)):
+    try:
+        result = store.get_work_reader(str(item_id))
+    except CatalogNotFound:
+        raise failure(404, "content_not_found", "콘텐츠를 찾을 수 없습니다.") from None
+    return {
+        "work": serialize_entity(result["work"], "works"),
+        "chapters": [
+            {"chapter": serialize_entity(item["chapter"], "chapters"),
+             "bites": [serialize_entity(bite, "bites") for bite in item["bites"]]}
+            for item in result["chapters"]
+        ],
+    }
 
 
 @router.get("/catalog/chapters/{item_id}")
