@@ -19,9 +19,9 @@ UI 작업을 마친 뒤 아래 구분선 다음 내용을 iOS 저장소의 새 �
 
 ## 연결 전 설정 확인
 
-실제 API 기본 주소, iOS OAuth client ID, Web application OAuth client ID의 준비 상태를 확인해 주세요. 프로젝트에 안전하게 관리되는 기존 설정이 있으면 사용하고, 없으면 환경별 설정 지점과 자리표시자를 만들어 주세요. 실제 값이 없는 상태에서 성공했다고 보고하지 마세요.
+실제 API 기본 주소, iOS OAuth client ID와 서버의 audience 허용 목록을 확인해 주세요. Web application OAuth client ID를 사용하는 권장 구성인지, 서버 ID 없이 iOS client ID를 허용하는 native 구성인지 API 계약에 따라 확인하세요. Web ID가 없다는 이유만으로 native Google 인증을 막지 마세요. 프로젝트에 안전하게 관리되는 기존 설정이 있으면 사용하고, 없으면 환경별 설정 지점과 자리표시자를 만들어 주세요. 실제 값이 없는 상태에서 성공했다고 보고하지 마세요.
 
-API 기본 주소의 공개 운영값은 아직 미정입니다. 기존 `http://vpn.xixiplay.com:8000` 주소로 실제 비밀번호나 토큰을 전송하지 마세요. 공개 연결은 HTTPS를 사용하세요. 개발용 계정으로 Mac의 loopback SSH 터널을 쓰는 Simulator 검증은 가능하지만 실기기의 `127.0.0.1`은 Mac이 아닙니다. 모든 HTTP 요청을 허용하는 ATS 예외를 추가하지 말고, 로컬 개발에 필요한 설정은 Debug와 해당 연결에만 제한하세요.
+현재 API 기본 주소는 `https://vpn.xixiplay.com`이며 API `1.2.0`과 인증·native iOS audience 허용 목록을 서버에 적용했습니다. 서버 검증 기록과 사용자가 확인한 실제 iPhone Google 로그인 결과는 백엔드 README를 확인하세요. 이전 `http://vpn.xixiplay.com:8000` 주소로 실제 비밀번호나 토큰을 전송하지 마세요. 개발용 계정으로 Mac의 loopback SSH 터널을 쓰는 Simulator 검증은 가능하지만 실기기의 `127.0.0.1`은 Mac이 아닙니다. 모든 HTTP 요청을 허용하는 ATS 예외를 추가하지 말고, 로컬 개발에 필요한 설정은 Debug와 해당 연결에만 제한하세요.
 
 Google Cloud 프로젝트·클라이언트 ID가 없다면 `docs/auth-api.md`의 설정 절차를 안내하고, 구현을 진행할 수 있는 부분은 계속해 주세요. Google client secret, `.env`, DB 비밀번호, `MEDIA_API_KEY`는 요구하거나 앱에 넣지 마세요.
 
@@ -68,7 +68,11 @@ refresh token은 한 번만 사용합니다. 갱신하면 기존 access/refresh 
 
 로그아웃은 현재 refresh token을 서버에 보내 세션을 해제하고 Keychain·메모리 상태를 지웁니다. 네트워크 오류가 나도 로컬 로그아웃은 완료하고 서버 해제 미확인 사실을 안내하세요. 갱신 중 로그아웃이나 계정 전환이 일어나면 늦게 도착한 응답으로 이전 세션이 부활하지 않도록 처리하세요. Google SDK의 로컬 로그인 상태도 정리하되 로그아웃만으로 Google 계정 연결 권한을 철회하는 동작을 추가하지 마세요.
 
-Google SDK가 이미 있으면 활용하고 없으면 공식 Google Sign-In iOS 패키지를 앱 타깃에 연결하세요. 현재 공식 문서와 프로젝트 호환성을 확인해 버전을 결정하고 의존성 잠금 파일을 보존하세요. `GIDClientID`는 iOS 유형 ID, `GIDServerClientID`는 Web application 유형 ID, URL scheme은 역순 iOS client ID입니다. 앱으로 돌아오는 URL 처리를 기존 SwiftUI 진입점과 충돌 없이 연결하세요. backend `GOOGLE_CLIENT_IDS`에도 같은 Web application ID가 허용되어 있어야 합니다. ID token은 Google SDK에서 필요 시 갱신해 획득하세요. iPhone·iPad 모두 적절한 화면에서 인증창을 표시하고, 사용자가 창을 취소하면 원래 화면에 머물게 하세요. [Google iOS 설정](https://developers.google.com/identity/sign-in/ios/start-integrating), [Google iOS 로그인](https://developers.google.com/identity/sign-in/ios/sign-in), [백엔드 ID token 전달](https://developers.google.com/identity/sign-in/ios/backend-auth)
+Google SDK가 이미 있으면 활용하고 없으면 공식 Google Sign-In iOS 패키지를 앱 타깃에 연결하세요. 현재 공식 문서와 프로젝트 호환성을 확인해 버전을 결정하고 의존성 잠금 파일을 보존하세요. `GIDClientID`는 iOS 유형 ID이고 URL scheme은 역순 iOS client ID입니다. 앱으로 돌아오는 URL 처리를 기존 SwiftUI 진입점과 충돌 없이 연결하세요. [Google iOS 설정](https://developers.google.com/identity/sign-in/ios/start-integrating), [Google iOS 로그인](https://developers.google.com/identity/sign-in/ios/sign-in)
+
+`GIDServerClientID`는 선택값입니다. 지정한다면 Web application 유형 ID를 사용하고 백엔드 `GOOGLE_CLIENT_IDS`에도 같은 ID를 허용해야 합니다. 생략한 native 구성에서는 SDK의 `serverClientID`에 `nil`을 전달하고 백엔드에 iOS client ID를 허용합니다. 빈 서버 설정을 iOS ID로 채우거나, 서버 ID 누락만으로 설정 오류를 표시하지 마세요. 이 선택값 계약은 SDK `9.2.0` 소스와 공식 iOS 예제에서 확인했으며, 백엔드는 두 구성 모두 ID token의 audience를 허용 목록과 대조합니다. 잘못된 명시 설정·URL scheme·서버 audience 불일치는 정상 오류로 처리하고 서명 검증을 우회하지 마세요. [SDK 설정 계약](https://github.com/google/GoogleSignIn-iOS/blob/9.2.0/GoogleSignIn/Sources/Public/GoogleSignIn/GIDConfiguration.h), [Google의 iOS client ID 설정·ID token 예제](https://firebase.google.com/docs/auth/ios/google-signin#implement_google_sign-in)
+
+ID token은 Google SDK에서 필요 시 갱신해 획득하세요. iPhone·iPad 모두 적절한 화면에서 인증창을 표시하고, 사용자가 창을 취소하면 원래 화면에 머물게 하세요. Google 인증창 표시와 고전한입 서버의 로그인 완료를 구분하세요. 실제 서버 배포·활성화·audience 설정·보호된 연결이 준비되지 않았다면 로그인 완료로 표시하지 마세요. [백엔드 ID token 전달](https://developers.google.com/identity/sign-in/ios/backend-auth)
 
 오류는 `{detail:{code,message,fields?}}`이며 선택적 `fields`는 `{field,type}` 객체 배열입니다. 상태 코드와 `code`를 기준으로 한국어 메시지와 재시도 여부를 정하세요. `401 invalid_credentials`, `invalid_token`, `invalid_google_token`; `408 request_timeout`; `409 email_in_use`; `413 request_too_large`; `422 validation_error`; `429 rate_limited`와 `Retry-After`; `503 google_not_configured`, `google_unavailable`, `auth_unavailable`, `auth_disabled`를 처리하세요. 알 수 없는 응답·디코딩 오류도 사용자에게 복구 가능한 실패로 표시하세요. 토큰 갱신을 회원가입·로그인 실패의 자동 해결책으로 호출하지 마세요.
 
@@ -76,6 +80,6 @@ Google SDK가 이미 있으면 활용하고 없으면 공식 Google Sign-In iOS 
 
 현재 프로젝트에서 가능한 빌드·테스트를 실행하세요. 기존 테스트 기반이 있으면 활용하고, 필요한 경우 네트워크 모의를 통해 다음 핵심 상태 전이를 검증할 최소 테스트를 추가하세요: 가입/로그인 성공, 오류 DTO 처리, 동시 401의 단일 refresh, 회전 후 토큰 교체, refresh 응답 유실, 로그아웃 중 늦은 응답, 앱 재시작 세션 복구. 테스트를 통과시키기 위해 실제 인증 검증을 우회하지 마세요.
 
-사용자 확인 항목으로 정상 가입, 중복 이메일, 잘못된 비밀번호, 입력 길이 검증, Google 첫 가입·재로그인·취소·이메일 충돌, 만료 후 갱신, 로그아웃, 오프라인과 503, iPhone·iPad 화면 동작을 제시하세요. Google 설정이 없으면 모의 검증과 실제 Google 연동 미검증을 구분하세요. 실제 HTTPS API 주소가 없다면 운영 연결을 완료했다고 하지 마세요.
+사용자 확인 항목으로 정상 가입, 중복 이메일, 잘못된 비밀번호, 입력 길이 검증, Google 첫 가입·재로그인·취소·이메일 충돌, 만료 후 갱신, 로그아웃, 오프라인과 503, iPhone·iPad 화면 동작을 제시하세요. native 구성에서는 Web ID 없이 인증창을 열 수 있는지와 서버의 iOS audience 허용을 확인하고, 서버 ID를 명시한 구성에서는 Web audience 허용을 확인하세요. 허용되지 않은 audience의 거부도 검증하세요. Google 설정이 없으면 모의 검증과 실제 Google 연동 미검증을 구분하세요. 실제 HTTPS API 주소가 없다면 운영 연결을 완료했다고 하지 마세요.
 
 완료 보고에는 저장소·worktree 경로, 브랜치, Git 초기화 여부, 수정 파일과 역할, 실행한 검증과 실패·미실행 이유, 사용자 확인 항목, 실제 연결에 남은 설정, 생성 커밋 ID 또는 미커밋 사실, push 미실행을 포함하세요. 명시적인 사용자 테스트 통과 확인 전에는 통합을 위한 rebase·squash·`dev` 병합을 하지 마세요. push와 브랜치·worktree 삭제도 수행하지 마세요.
