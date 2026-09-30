@@ -1,7 +1,7 @@
 # 고전한입 백엔드 · Classic Bites Backend
 이 저장소는 고전한입 백엔드의 소스와 Docker 운영 구성을 관리합니다. iOS 앱은 별도 `classic-bites-ios` 저장소에서 관리합니다. 작업 규칙은 [AGENTS.md](AGENTS.md)를 따릅니다.
 
-세 서비스를 Docker Compose 프로젝트 하나로 설치하고 함께 시작·중지하는 구성입니다. 서버의 기존 서비스와 구분되는 `classic-bites-stack` 프로젝트를 사용합니다. FastAPI, MySQL, MinIO는 서버의 외부 인터페이스(`0.0.0.0`)에서 각각 아래 포트를 수신하도록 구성합니다. 공유기의 해당 포트 포워딩이 연결되어 있으면 SSH 터널 없이 직접 접속할 수 있습니다.
+세 서비스를 Docker Compose 프로젝트 하나로 설치하고 함께 시작·중지하는 구성입니다. 서버의 기존 서비스와 구분되는 `classic-bites-stack` 프로젝트를 사용합니다. 2026-09-30 FastAPI는 기존 nginx를 통한 `https://vpn.xixiplay.com`으로 공개하며, 호스트의 API 포트는 `127.0.0.1:8000`에만 연결합니다. MySQL·MinIO의 기존 포트 설정은 유지합니다. 초기 설치 기록과 현재 인증·HTTPS 배포 결과는 각각 9절과 11절에 있습니다.
 
 ## 1. 설치 위치와 구성
 
@@ -25,6 +25,8 @@ SSH 비밀번호와 서비스 비밀번호는 이 문서에 저장하지 않습�
 | 경로 | 역할 |
 | --- | --- |
 | `compose.yaml` | 세 서비스, 내부 네트워크, 호스트 접속 포트, 데이터 볼륨 정의 |
+| `compose.https.yaml` | 기존 nginx 연결, FastAPI loopback 포트와 신뢰 프록시 설정 |
+| `deploy/nginx-classic-bites.conf` | API HTTPS·ACME와 스트림 프록시 템플릿 |
 | `stack.sh` | 설치·시작·중지·상태 확인 명령 |
 | `.env` | 서버에서 생성하는 실제 비밀번호와 환경 설정 |
 | `.env.example` | 비밀번호를 포함하지 않는 설정 예시 |
@@ -33,7 +35,7 @@ SSH 비밀번호와 서비스 비밀번호는 이 문서에 저장하지 않습�
 | `scripts/` | 설치 보조 및 연결 점검 도구 |
 | `README.md` | 이 운영 설명서 |
 
-기존 배포 서버는 `/health`, `/ready`, `/docs`와 미디어 파일 CRUD API를 제공합니다. 이번 로컬 소스에는 로그인·회원가입 API를 추가했으며 배포 여부와 사용법은 [인증 기능](#11-로그인회원가입-로컬-구현)을 확인하세요. 학습 API와 MySQL의 파일 정보 테이블은 아직 없습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
+현재 배포 서버의 API 버전은 `1.2.0`이며 `/health`, `/ready`, `/docs`, 미디어 파일 CRUD와 로그인·회원가입 API를 제공합니다. 인증은 활성화했고 사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 설정·검증 결과는 [인증 기능](#11-로그인회원가입과-https-배포)을 확인하세요. 학습 API와 MySQL의 파일 정보 테이블은 아직 없습니다. 파일 API는 아래 버킷의 다섯 경로만 사용하며 `X-API-Key` 인증이 필요합니다. FastAPI는 전용 MinIO 계정으로 이 버킷의 파일을 관리합니다. MinIO 관리자 비밀번호는 초기 권한 설정과 설치 점검 프로세스에 표준입력으로 일시 전달하며, FastAPI의 상시 환경 변수에는 넣지 않습니다.
 
 ### 미디어 버킷과 파일 경로
 
@@ -131,29 +133,29 @@ docker compose config --quiet
 
 ### 공유기 포트 포워딩으로 직접 접속
 
-2026-09-29 사용자 요청에 따라 FastAPI뿐 아니라 MySQL과 MinIO도 외부 인터페이스(`0.0.0.0`)에서 수신하도록 구성합니다. 직접 접속에는 SSH 터널이 필요하지 않습니다.
+2026-09-29에는 세 서비스의 직접 외부 접속을 준비했습니다. 2026-09-30부터 API는 기존 nginx의 HTTPS 경로로 접속하고 직접 공개 `:8000`은 사용하지 않습니다. MySQL·MinIO는 기존 설정을 유지하며, API의 HTTPS 접속에는 SSH 터널이 필요하지 않습니다.
 
 | 서비스 | 직접 접속 주소 | 서버 호스트 포트 → 컨테이너 포트 |
 | --- | --- | --- |
-| FastAPI API 문서 | <http://vpn.xixiplay.com:8000/docs> | `0.0.0.0:8000` → `8000` |
-| FastAPI 실행 상태 | <http://vpn.xixiplay.com:8000/health> | 동일 |
-| FastAPI 의존 서비스 상태 | <http://vpn.xixiplay.com:8000/ready> | 동일 |
+| FastAPI API 문서 | <https://vpn.xixiplay.com/docs> | 기존 nginx `443` → Docker 내부 API `8000` |
+| FastAPI 실행 상태 | <https://vpn.xixiplay.com/health> | 동일 |
+| FastAPI 의존 서비스 상태 | <https://vpn.xixiplay.com/ready> | 동일 |
+| FastAPI 서버 내부 접속 | 외부 접속 불가; 서버의 `http://127.0.0.1:8000` | `127.0.0.1:8000` → `8000` |
 | MinIO 웹 콘솔 | <http://vpn.xixiplay.com:9001> | `0.0.0.0:9001` → `9001` |
 | MinIO S3 API | `http://vpn.xixiplay.com:9000` | `0.0.0.0:9000` → `9000` |
 | MySQL | 호스트 `vpn.xixiplay.com`, 포트 `3307` | `0.0.0.0:3307` → `3306` |
 
 MySQL 접속 프로그램에서는 데이터베이스 `classic_bites`, 사용자 `classic_bites`, `.env`의 `MYSQL_PASSWORD`를 사용합니다. MySQL은 브라우저 주소가 아니라 DB 접속 프로그램에서 연결합니다. MinIO 콘솔에서는 사용자 `classicbitesadmin`, `.env`의 `MINIO_ROOT_PASSWORD`를 사용합니다.
 
-공유기에서 다음 TCP 포트 포워딩이 필요합니다. 서버 내부 주소 `192.168.0.100`은 이번 서버 확인 시점 기준입니다. 공유기 설정 자체는 이번 작업에서 변경하지 않았습니다.
+외부 HTTPS와 ACME에는 기존 nginx의 TCP `443`·`80` 경로를 사용합니다. `:8000` 직접 접속은 차단합니다. 아래 MySQL·MinIO 포워딩은 초기 설치 설정이며 서버 내부 주소 `192.168.0.100`은 2026-09-29 확인 기준입니다. 이번 HTTPS 작업에서 공유기 설정 자체는 변경하지 않았습니다.
 
 | 외부 TCP 포트 | 대상 서버 | 내부 TCP 포트 |
 | --- | --- | --- |
-| `8000` | `192.168.0.100` | `8000` |
 | `3307` | `192.168.0.100` | `3307` |
 | `9000` | `192.168.0.100` | `9000` |
 | `9001` | `192.168.0.100` | `9001` |
 
-MinIO의 `MINIO_BROWSER_REDIRECT_URL`은 Compose에서 `http://vpn.xixiplay.com:${MINIO_CONSOLE_PORT:-9001}`로 설정합니다. 기본 설정에서는 S3 API 주소를 브라우저에서 열 때 외부 콘솔 주소 `http://vpn.xixiplay.com:9001`로 이동합니다. 웹 접속 주소는 HTTP이며 HTTPS와 도메인 인증서는 구성하지 않았습니다.
+MinIO의 `MINIO_BROWSER_REDIRECT_URL`은 Compose에서 `http://vpn.xixiplay.com:${MINIO_CONSOLE_PORT:-9001}`로 설정합니다. 기본 설정에서는 S3 API 주소를 브라우저에서 열 때 외부 콘솔 주소 `http://vpn.xixiplay.com:9001`로 이동합니다. MinIO의 직접 웹 주소는 기존 HTTP 설정이며 이번 HTTPS 적용 대상은 FastAPI입니다.
 
 ### 선택 사항: SSH 터널로 접속
 
@@ -214,7 +216,7 @@ Python 코드·패키지·Docker 빌드 파일을 변경한 경우 이미지를 
 
 ### 파일 CRUD API 사용
 
-Swagger 문서: <http://vpn.xixiplay.com:8000/docs>
+Swagger 문서: <https://vpn.xixiplay.com/docs>
 
 1. 서버에서 `nano ~/classic-bites-stack/.env`로 `MEDIA_API_KEY`를 확인합니다.
 2. Swagger의 **Authorize**에 이 키를 입력합니다. MinIO 관리자 비밀번호와는 다른 키입니다.
@@ -246,12 +248,12 @@ printf '\n'
 curl --fail-with-body \
   -H "X-API-Key: $MEDIA_API_KEY" \
   -F category=images -F file=@sample.jpg \
-  http://vpn.xixiplay.com:8000/files
+  https://vpn.xixiplay.com/files
 
 # 이미지 목록
 curl --fail-with-body \
   -H "X-API-Key: $MEDIA_API_KEY" \
-  'http://vpn.xixiplay.com:8000/files?category=images&limit=20'
+  'https://vpn.xixiplay.com/files?category=images&limit=20'
 
 # 업로드 응답의 key 값을 입력
 read -r -p '파일 key: ' object_key
@@ -260,14 +262,14 @@ read -r -p '파일 key: ' object_key
 curl --fail-with-body -G \
   -H "X-API-Key: $MEDIA_API_KEY" \
   --data-urlencode "key=$object_key" \
-  http://vpn.xixiplay.com:8000/files/info
+  https://vpn.xixiplay.com/files/info
 
 # 파일 다운로드
 curl --fail-with-body -G \
   -H "X-API-Key: $MEDIA_API_KEY" \
   --data-urlencode "key=$object_key" \
   -o downloaded-file \
-  http://vpn.xixiplay.com:8000/files/download
+  https://vpn.xixiplay.com/files/download
 
 # 파일 키를 URL에 안전하게 넣기
 export object_key
@@ -277,16 +279,16 @@ encoded_key="$(python3 -c 'import os,urllib.parse; print(urllib.parse.quote(os.e
 curl --fail-with-body -X PUT \
   -H "X-API-Key: $MEDIA_API_KEY" \
   -F file=@replacement.jpg \
-  "http://vpn.xixiplay.com:8000/files?key=$encoded_key"
+  "https://vpn.xixiplay.com/files?key=$encoded_key"
 
 # 파일 삭제
 curl --fail-with-body -X DELETE \
   -H "X-API-Key: $MEDIA_API_KEY" \
-  "http://vpn.xixiplay.com:8000/files?key=$encoded_key"
+  "https://vpn.xixiplay.com/files?key=$encoded_key"
 unset MEDIA_API_KEY object_key encoded_key
 ```
 
-파일 API 키는 관리자·서버 간 작업용 공유 키입니다. 이 키를 앱 번들이나 웹 프런트엔드에 넣으면 안 됩니다. 사용자별 로그인·파일 소유권 검사는 별도 구현 대상입니다. 현재 외부 주소는 HTTP이므로 실제 서비스에서는 HTTPS를 구성하고, 그 전에는 SSH 터널을 이용해 인증 요청을 보호할 수 있습니다.
+파일 API 키는 관리자·서버 간 작업용 공유 키입니다. 이 키를 앱 번들이나 웹 프런트엔드에 넣으면 안 됩니다. 사용자별 로그인·파일 소유권 검사는 별도 구현 대상입니다. 외부 API 호출은 `https://vpn.xixiplay.com`을 사용하고 서버 내부·보호된 SSH 터널에서만 loopback HTTP로 연결합니다.
 
 기본 업로드 한도는 `MAX_UPLOAD_BYTES=104857600`(100 MiB)이며 초과 시 413, 동시 업로드 제한 시 429를 반환합니다. 한도를 늘릴 때는 `/tmp` 공간과 FastAPI 메모리 상한도 함께 검토해야 합니다. 파일 API는 버킷 생성·삭제나 다른 버킷 접근 권한이 없습니다.
 
@@ -339,7 +341,7 @@ cd ~/classic-bites-stack
 
   cp -p .env "$backup_dir/environment.env"
   tar -czf "$backup_dir/deployment.tar.gz" \
-    compose.yaml stack.sh .env.example README.md api minio scripts
+    compose.yaml compose.https.yaml stack.sh .env.example README.md api minio scripts deploy
   chmod 600 "$backup_dir"/*
   printf '백업 경로: %s\n' "$backup_dir"
   )
@@ -395,7 +397,7 @@ docker compose logs --tail 100 mysql minio fastapi
 ```
 
 - `/health`는 FastAPI 프로세스가 응답하는지 확인합니다.
-- `/ready`는 MySQL의 `SELECT 1`, MinIO의 `/minio/health/cluster`, 전용 S3 계정으로 미디어 버킷 접근을 확인합니다. `checks`에는 `mysql`, `minio`, `media_bucket` 결과가 있습니다.
+- `/ready`는 MySQL의 `SELECT 1`, MinIO의 `/minio/health/cluster`, 전용 S3 계정으로 미디어 버킷 접근을 확인합니다. `checks`에는 `mysql`, `minio`, `media_bucket` 결과가 있으며 인증 활성 상태에서는 `auth_schema`도 확인합니다.
 - `./stack.sh check`는 기반 서비스의 임시 DB·S3 점검, 파일 CRUD HTTP 통합 검사, 업로드·연결 종료 처리 테스트 11개를 실행합니다. 검사는 직접 만든 파일만 정리합니다. 기반 점검 실패로 `.smoke-state.json`이 남으면 원인을 해결한 뒤 `python3 scripts/smoke.py cleanup`으로 해당 점검 데이터만 정리하고 다시 실행합니다. 파일 CRUD 검사에서 정리에 실패하면 남은 검사 파일 키를 출력합니다.
 - `unhealthy`나 시작 대기 시간 초과가 나오면 해당 서비스 로그를 확인합니다. 첫 MySQL 초기화나 MinIO 빌드가 진행 중인지도 확인하세요.
 - `Address already in use`가 SSH 터널에서 나오면 내 컴퓨터의 해당 포트를 확인하고 터널의 왼쪽 포트를 바꿉니다. 서버에서 나오면 다른 서비스의 포트를 바꾸지 말고 이 Compose의 충돌을 확인합니다.
@@ -405,7 +407,7 @@ docker compose logs --tail 100 mysql minio fastapi
 
 ## 9. 버전 및 설치 검증 기록
 
-설치·검증일: 2026-09-29. 세 서비스 설치를 완료했으며 최종 상태는 모두 `healthy`입니다. 아래 결과는 실제 서버와 SSH 터널을 통해 확인했습니다.
+설치·검증일: 2026-09-29. 당시 세 서비스 설치를 완료했으며 최종 상태는 모두 `healthy`였습니다. 아래 표는 실제 서버와 SSH 터널을 통한 초기 설치 기록이며 2026-09-30의 API 버전·공개 주소·포트 변경은 11절에 별도로 기록합니다.
 
 | 구성 요소 | 선택 / 확인 내용 | 상태 |
 | --- | --- | --- |
@@ -440,7 +442,7 @@ docker compose logs --tail 100 mysql minio fastapi
 
 MinIO 커뮤니티 공식 저장소는 2026-04-25에 보관 처리되었으며 유지보수 중단을 알리고 있습니다. 이 구성은 고정한 공식 소스 릴리스를 Docker 이미지로 빌드합니다. 해당 버전을 선택했다고 이후 보안 수정이나 운영 지원이 제공되는 것은 아닙니다. [MinIO 공식 저장소의 유지보수 안내](https://github.com/minio/minio), [고정한 공식 릴리스](https://github.com/minio/minio/releases/tag/RELEASE.2025-10-15T17-29-55Z)
 
-운영 요구가 커질 때에는 유지보수 가능한 저장소 대안, 외부 HTTPS 공개 여부, 사용자별 인증·파일 소유권, 백업 주기·보존 기간·복구 시험, 서버 자원과 모니터링을 별도 결정해야 합니다. 이 구성은 iOS 저장소와 분리된 백엔드 전용 저장소에서 관리합니다. 위 표는 2026-09-29 서버 설치·CRUD 적용 시점의 검증 기록이며, 로컬 Git 이력 정리를 위해 서버를 재배포하거나 재시작하지 않습니다.
+운영 요구가 커질 때에는 유지보수 가능한 저장소 대안, 사용자별 인증·파일 소유권, 백업 주기·보존 기간·복구 시험, 서버 자원과 모니터링을 별도 결정해야 합니다. 이 구성은 iOS 저장소와 분리된 백엔드 전용 저장소에서 관리합니다. 위 표는 2026-09-29 서버 설치·CRUD 적용 시점의 검증 기록이며, 현재 API HTTPS 배포 결과와 구분합니다. 로컬 Git 이력 정리만을 위해 서버를 재배포하거나 재시작하지 않습니다.
 
 사용자 확인 항목은 `/docs`에서 `MEDIA_API_KEY`로 Authorize한 뒤 테스트 파일을 업로드·조회·교체·삭제하고, MinIO 콘솔에서도 저장 경로를 확인하는 것입니다. MinIO 파일 API를 외부에서 직접 사용할 경우 TCP `9000` 포워딩은 별도로 확인해야 합니다. 업무 기능을 추가할 때는 원하는 API 동작, 데이터·파일 범위와 완료 조건을 알려 주세요.
 
@@ -468,21 +470,22 @@ git status --short
 
 다음 기능 요청에는 원하는 API 동작, 대상 데이터·파일 범위, 완료 조건과 필요하면 선호 브랜치 이름을 적어 주세요.
 
-## 11. 로그인·회원가입 로컬 구현
+## 11. 로그인·회원가입과 HTTPS 배포
 
-이메일·비밀번호 가입/로그인과 Google ID token 로그인/첫 가입을 추가했습니다. 로그인 유지, 현재 사용자 조회, access/refresh token 갱신과 로그아웃을 포함합니다. API 소스 버전은 `1.2.0`이며 위 9절의 서버 `1.1.0` 설치 기록과 다릅니다. 이번 변경은 아직 운영 서버에 배포하지 않았습니다.
+이메일·비밀번호 가입/로그인과 Google ID token 로그인/첫 가입을 추가했습니다. 로그인 유지, 현재 사용자 조회, access/refresh token 갱신과 로그아웃을 포함합니다. 2026-09-30 API `1.2.0`을 서버에 배포하고 HTTPS와 인증을 활성화했습니다. 위 9절의 `1.1.0`은 초기 설치 기록입니다. 사용자가 실제 iPhone에서 Google 계정 로그인과 서재 진입 성공을 확인했습니다. 에이전트는 계정·비밀번호·실제 ID token을 조회하지 않았습니다.
 
 - [인증 API 계약과 Google Cloud 설정 안내](docs/auth-api.md): 요청·응답, 오류 코드, 서버 활성화, Google 클라이언트 생성 및 사용자 확인 항목.
 - [UI 완료 후 사용할 iOS 연결 프롬프트](docs/ios-auth-integration-prompt.md): 완성된 화면을 유지하며 인증 API·Google SDK·Keychain·세션 갱신에 연결하는 작업 요청문.
 - `api/auth.py`, `api/auth_guard.py`: 인증 API와 비밀번호 해시, Google 서명 검증, 요청 제한·오류 보호.
 - `api/auth_store.py`, `api/migrations/001_auth.sql`: MySQL 회원·세션·갱신 이력·시도 제한 저장과 트랜잭션.
 - `api/migrate_auth.py`, `api/prune_auth.py`: 인증 테이블 준비와 만료된 인증 기록의 제한된 정리.
+- [compose.https.yaml](compose.https.yaml), [nginx 템플릿](deploy/nginx-classic-bites.conf): 기존 nginx와 연결하는 HTTPS 운영 구성. 현재 서버에는 이 오버레이와 전용 프록시 설정을 적용했습니다.
 
 `AUTH_ENABLED`를 지정하지 않으면 프로세스와 Compose에서 인증을 비활성화합니다. `.env.example`과 `stack.sh install`도 누락된 값을 `false`로 준비하며 기존 `.env`의 값은 보존합니다. HTTPS 또는 보호된 로컬 개발 연결을 준비한 뒤 서버 `.env`에서 `AUTH_ENABLED=true`로 명시적으로 활성화합니다. 설치 스크립트는 누락된 `AUTH_RATE_LIMIT_SALT`를 난수로 추가합니다. Google 설정이 비어 있으면 활성화 후 이메일 인증만 먼저 사용할 수 있고 `/auth/google`은 `503 google_not_configured`를 반환합니다. 실제 OAuth 클라이언트 ID와 HTTPS 주소가 준비되기 전에는 실제 Google·iOS 연동을 완료했다고 판단하지 않습니다.
 
 ### 서버 적용 절차
 
-다음은 소스를 대상 서버에 배포한 이후의 절차입니다. 이번 로컬 개발 중에는 실행하지 않았습니다. 기존 `.env`와 데이터 볼륨을 보존하고, 정상 백업을 확인한 뒤 적용합니다. Google 설정은 위 문서를 따라 서버의 비공개 `.env`에 입력합니다. 안전한 연결 준비 후 `AUTH_ENABLED=true`를 설정하고 `./stack.sh start`로 반영합니다.
+다음은 최초 설치 절차입니다. 기존 정상 서비스에 API만 갱신할 때는 아래 HTTPS 적용 절의 FastAPI 전용 명령을 사용합니다. 기존 `.env`와 데이터 볼륨을 보존하고 정상 백업을 확인합니다. Google 설정은 위 문서를 따라 서버의 비공개 `.env`에 입력하며 보호된 연결 준비 후에만 `AUTH_ENABLED=true`로 활성화합니다. 이번 실제 적용·검증 결과는 이 절의 서버 배포 기록에 있습니다.
 
 ```sh
 # 소스와 이미지 변경 적용: 누락 환경 설정 추가 → 이미지 빌드 → 기반 서비스
@@ -498,6 +501,34 @@ docker compose run --rm --no-deps fastapi python migrate_auth.py
 ```
 
 이 마이그레이션은 새 `auth_` 테이블 네 개를 만들고 기존 테이블·파일을 삭제하거나 바꾸지 않습니다. MySQL DDL은 전체 트랜잭션 롤백이 되지 않으므로 중간 실패 시 원인을 해결한 뒤 같은 명령을 재실행합니다. 준비 후 `/ready`는 `AUTH_ENABLED=true`일 때 `auth_schema`도 확인합니다. `./stack.sh check`는 기존 미디어 서비스 검사이며 회원 테스트는 아래 별도 명령을 사용합니다.
+
+### 기존 nginx를 통한 HTTPS 적용
+
+다음은 적용·재적용 절차이며 실제 실행 결과는 아래 서버 배포 기록과 구분합니다. 기본 `compose.yaml`의 공개 포트 설정은 유지하고 `compose.https.yaml`을 함께 적용할 때 FastAPI의 호스트 포트를 `127.0.0.1`로 교체합니다. `!override`에는 Docker Compose 2.24.4 이상이 필요합니다. 포트 목록에 loopback 항목만 추가하면 기존 공개 포트도 남으므로 반드시 이 오버레이를 사용합니다. [Compose 병합 규칙](https://docs.docker.com/reference/compose-file/merge/)
+
+오버레이는 FastAPI를 기존 기본 네트워크와 외부 `xixicash-net`에 연결하고 nginx가 `classic-bites-api:8000`으로 접근하게 합니다. MySQL·MinIO는 프록시 네트워크에 추가하지 않습니다. 기존 `xixi-proxy`가 해당 네트워크에 연결되어 있어야 합니다. [외부 네트워크 연결](https://docs.docker.com/compose/how-tos/networking/)
+
+1. 서버 내부의 별도 비공개 폴더에 기존 소스·Compose·`.env`·nginx 설정을 백업하고 정상 DB 백업과 기존 이미지 복구 가능 여부를 확인합니다. `.env`와 인증서 개인 키를 로컬 저장소로 가져오거나 출력하지 않습니다. MySQL·MinIO와 기존 프록시 서비스의 컨테이너 ID·시작 시각도 확인합니다. 기존 앱 DB 계정에 스키마 준비용 `CREATE`·`REFERENCES`와 API용 `SELECT`·`INSERT`·`UPDATE`·`DELETE` 권한이 있는지 확인합니다. 권한 부족을 계정 재생성이나 볼륨 초기화로 해결하지 않습니다.
+2. 추적하는 소스만 서버에 전달하고 기존 `.env`와 볼륨을 보존합니다. `python3 scripts/init-env.py`로 누락 설정만 준비하고 `AUTH_ENABLED=false`를 유지합니다. 서버의 비공개 `.env`에 `COMPOSE_FILE=compose.yaml:compose.https.yaml`을 설정합니다. Linux의 Compose 파일 구분자는 `:`입니다. 이후 기존 `stack.sh`와 `docker compose` 명령 모두 동일한 오버레이를 사용합니다. 명시적 `-f compose.yaml` 또는 다른 프로세스의 `COMPOSE_FILE`로 이 설정을 우회하지 않습니다.
+3. 기존 `xixi-proxy`의 `xixicash-net` IPv4 주소를 확인해 `AUTH_TRUSTED_PROXY_IP`에 **그 주소 하나만** 설정합니다. Uvicorn은 이 IP에서 들어온 전달 헤더만 신뢰하며 nginx는 `X-Forwarded-For`를 실제 접속 IP로 덮어씁니다. `*`나 프록시 네트워크 전체 CIDR은 허용하지 않습니다. `GOOGLE_CLIENT_IDS`에는 앱이 사용하는 audience를 설정합니다. 서버 ID 없는 native 방식이면 iOS ID, 서버 ID 지정 방식이면 Web application ID를 허용합니다. 실제 값은 비공개 설정에서만 관리합니다.
+4. 다음 명령으로 FastAPI만 빌드하고 네 인증 테이블을 준비한 뒤 교체합니다. `stack.sh install`·`restart`는 전체 서비스가 대상이므로 기존 정상 서비스의 최소 갱신에는 아래 명령을 사용합니다.
+
+```sh
+docker compose config --quiet
+docker compose build fastapi
+docker compose run --rm --no-deps fastapi python migrate_auth.py
+docker compose up -d --no-deps --wait --wait-timeout 180 fastapi
+docker compose port fastapi 8000
+```
+
+5. 마지막 명령의 바인딩이 `127.0.0.1`인지, FastAPI가 기본·프록시 네트워크 모두에 연결되는지 확인합니다. 인증 비활성 상태에서는 `/ready`가 인증 테이블을 검사하지 않으므로 마이그레이션의 스키마 검증 결과도 확인합니다. `/health`·`/ready`와 OpenAPI 버전·인증 경로, `/auth/me`의 `503 auth_disabled`를 확인합니다.
+6. 기존 nginx의 `/home/xixi/xixi/xixi-proxy/conf.d`에 고전한입 전용 설정을 추가합니다. [템플릿](deploy/nginx-classic-bites.conf)은 nginx 내부의 `/var/www/certbot`·`/etc/letsencrypt`를 사용하므로 기존 호스트 경로 `/home/xixi/certbot/www`·`/home/xixi/certbot/conf`가 각각 연결되어 있는지 확인합니다. 유효한 `vpn.xixiplay.com` 인증서가 있으면 재사용합니다. 없으면 먼저 템플릿의 HTTP 서버 블록만 적용해 ACME webroot를 제공하고 기존 Certbot 실행 방식·ACME 계정·설정 디렉터리로 해당 도메인 인증서를 발급합니다. 인증서 준비 전 HTTPS 블록을 로드하지 않습니다. 기존 서비스의 인증서·계정·설정을 덮어쓰지 않습니다.
+7. 인증서 준비 후 전체 템플릿을 적용하고 **기존 nginx 컨테이너 안에서 `nginx -t` 성공 후에만 `nginx -s reload`**합니다. 프록시 전체 재생성은 필요하지 않습니다. 템플릿은 HTTP에서 ACME 파일만 제공하고 나머지 요청은 HTTPS로 이동하며, API는 HTTPS에서만 프록시합니다. Docker DNS를 요청 시 다시 조회해 FastAPI 재생성 후에도 새 주소로 연결합니다. 업로드·다운로드 버퍼링과 프록시 자동 재시도를 끄므로 스트림 처리와 한 번만 쓰는 refresh 요청을 보존합니다.
+8. 외부에서 인증서 호스트·유효기간·신뢰와 `https://vpn.xixiplay.com/health`, `/ready`, `/openapi.json`을 확인합니다. 공개 `:8000`으로 직접 접근할 수 없는지와 HTTP에서 `/auth/` 요청을 API로 전달하지 않는지도 확인합니다. 모든 경로가 준비된 후에만 서버 `.env`의 `AUTH_ENABLED=true`를 설정하고 4번의 `up --no-deps` 명령으로 FastAPI만 다시 적용합니다. 활성화 후 `/ready`의 `auth_schema=ok`, 실제 Google 가입·재로그인·세션 복구·로그아웃과 기존 미디어 API를 확인합니다. `./stack.sh check`는 임시 검사 데이터를 만들고 정리하며, DB 검사에는 `DROP` 권한도 필요합니다.
+
+`xixi-proxy`를 재생성하면 IP가 바뀔 수 있습니다. 프록시 IP를 다시 확인하고 서버 `AUTH_TRUSTED_PROXY_IP`를 갱신한 뒤 FastAPI를 재적용합니다. IP가 맞지 않으면 전달 IP를 신뢰하지 않아 회원 요청 제한이 프록시 IP 하나로 합쳐집니다. 프록시 네트워크의 임의 컨테이너를 신뢰 대상으로 확대하지 않습니다.
+
+문제 발생 시 먼저 `AUTH_ENABLED=false`로 인증을 중지하고 FastAPI만 재적용합니다. 필요하면 백업한 소스·Compose·이전 이미지를 복구해 FastAPI만 다시 생성하되 새 인증 테이블과 기존 볼륨은 보존합니다. `.env` 복구 시 현재 자격증명을 유지하고 공개 HTTP 바인딩으로 돌아가기 전에 인증 비활성을 확인합니다. nginx 설정은 고전한입 변경만 복구하고 `nginx -t` 후 reload합니다. 다른 서비스 설정·컨테이너·인증서나 데이터 볼륨을 삭제하지 않습니다.
 
 인증 기록 정리는 한 번에 만료 세션과 요청 제한 기록을 각각 최대 500개 처리합니다. 회원은 삭제하지 않으며 사용한 refresh token 이력은 세션의 절대 만료 전까지 유지합니다. 예약 실행은 아직 설정하지 않았습니다.
 
@@ -533,8 +564,30 @@ git diff --check
 | 로컬 문서 링크, `git diff --check`, `git diff --cached --check` | 통과 |
 | `docker build -t classic-bites-auth-check:local api` | 기본 이미지 메타데이터 조회에서 진행되지 않아 중단; 새 이미지 빌드 미검증 |
 
-총 50개 자동 테스트가 통과했습니다. 테스트 도구의 `httpx` 사용에 대한 Starlette 변경 예고 경고가 있지만 실패는 아닙니다. 운영 서버 배포·실제 Google 계정·iOS 연결은 실행하지 않았습니다.
+2026-09-29 로컬 개발 당시 총 50개 자동 테스트가 통과했습니다. 테스트 도구의 `httpx` 사용에 대한 Starlette 변경 예고 경고가 있지만 실패는 아닙니다. 당시에는 운영 서버 배포·실제 Google 계정·iOS 연결을 실행하지 않았습니다. 현재 서버 배포 결과는 다음 기록을 확인합니다.
 
 인증 테스트의 Google 검증은 테스트용 RSA 키로 서명한 ID token과 테스트 인증서를 사용합니다. 실제 검증 라이브러리의 서명·발급자·대상·만료 검사를 확인하지만 실제 Google 로그인창·동의 화면·클라이언트 설정 검증을 대신하지 않습니다.
 
-남은 사용자 확인은 문서의 API와 일반/Google 가입 정책, Google Cloud 설정, HTTPS 주소와 서버 배포, 완성된 iOS UI 연결 후 실제 회원가입·로그인·자동 로그인·로그아웃입니다. 이메일 인증 메일·비밀번호 재설정·계정 연결·탈퇴는 이번 범위에 포함하지 않았습니다. 명시적인 테스트 승인 전에는 `dev`에 통합하지 않습니다.
+### 2026-09-30 서버 배포·검증 기록
+
+기존 SSH 접속과 서버의 Docker Compose `v5.1.4`를 사용했습니다. 원본 소스·서버 환경 설정은 서버 내부의 권한 `700`인 별도 배포 백업 폴더에 보관하고 MySQL 논리 백업을 확보했습니다. `.env`·인증서 개인 키·백업을 로컬 저장소로 복사하지 않았으며 기존 자격증명과 데이터 볼륨을 보존했습니다.
+
+| 실행한 검사·적용 | 결과 |
+| --- | --- |
+| FastAPI 이미지 빌드·`pip check` | `classic-bites-fastapi:1.2.0` 빌드 및 의존성 검사 통과 |
+| 인증 마이그레이션·스키마 | 네 `auth_` 테이블 준비·필수 컬럼 검증 통과 |
+| FastAPI만 교체·인증 활성화 | `AUTH_ENABLED=true`, native iOS audience 허용 목록 적용; 실제 ID는 비공개 서버 설정에 보관 |
+| Compose HTTPS 오버레이 | 호스트 `127.0.0.1:8000`만 바인딩, 기본·프록시 네트워크 연결, 정확한 기존 프록시 IP만 신뢰 |
+| 기존 nginx·인증서 | 기존 ACME 계정으로 도메인 인증서 발급, 기존 nginx에서 `nginx -t`·reload 성공 |
+| 외부 HTTPS | 기본 CA·호스트 검증을 유지한 연결에서 `/health`·`/ready` HTTP 200, `auth_schema=ok` |
+| 외부 OpenAPI | 버전 `1.2.0`과 인증 경로 여섯 개 확인 |
+| 인증 실패 처리 | Bearer 없는 `/auth/me`는 `401 invalid_token`, 유효하지 않은 Google ID token은 `401 invalid_google_token` |
+| 공개 HTTP 제한 | 외부 `:8000` 접속 시간 초과, HTTP `:80` 인증 경로는 HTTPS로 `308` 이동하며 API에 평문 요청을 전달하지 않음 |
+| `./stack.sh check` | DB·미디어 통합 검사와 자원 검사 11개 통과; 임시 객체·검사 상태 정리 완료 |
+| 기존 서비스·데이터 | FastAPI 외 기존 12개 컨테이너 ID·시작 시각·실행 상태 동일; MySQL·MinIO 볼륨 유지 |
+| 인증서 갱신 설정 | 기존 사용자 crontab의 Certbot 전체 갱신·nginx reload 작업 재사용; 추가 일정 없음 |
+| 신규 도메인 인증서 갱신 검사 | `certbot renew --cert-name vpn.xixiplay.com --dry-run --no-random-sleep-on-renew --non-interactive` 종료 코드 0; 기존 인증서·제공 환경 변경 없음 |
+
+사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 에이전트가 검증한 서버 상태·잘못된 인증 정보 거부와 사용자가 확인한 실제 계정 로그인을 구분합니다. 첫 가입 여부·재로그인·앱 재실행 후 세션 복구·로그아웃의 추가 확인은 남아 있습니다.
+
+사용자는 이번 Google 로그인 수정의 실기기 테스트 통과를 확인했습니다. 일반/Google 가입 정책, 회원가입·자동 로그인·로그아웃의 추가 확인은 남아 있습니다. 이메일 인증 메일·비밀번호 재설정·계정 연결·탈퇴는 이번 범위에 포함하지 않았습니다. push는 사용자가 직접 수행합니다.

@@ -2,7 +2,7 @@
 
 이 문서는 이메일·비밀번호 회원가입/로그인, Google 계정 첫 로그인 시 가입, 세션 갱신과 로그아웃의 계약입니다. iOS 화면 연결용 요청문은 [iOS 인증 연결 프롬프트](ios-auth-integration-prompt.md)에 있습니다.
 
-현재 단계는 백엔드 소스 구현입니다. Google Cloud 프로젝트와 OAuth 클라이언트 ID는 아직 없고, 인증 API의 운영 서버 배포·HTTPS 구성·실제 Google 계정 로그인은 완료되지 않았습니다. 기존 서버의 파일 API 설치 기록과 이번 인증 API의 검증 결과를 구분합니다.
+2026-09-30 인증 API `1.2.0`을 서버에 배포하고 HTTPS·인증 활성화와 native iOS audience 허용 목록을 적용했습니다. 사용자가 실제 iPhone에서 Google 로그인과 서재 진입 성공을 확인했습니다. 현재 주소와 서버 검증 결과는 [README의 인증 배포 기록](../README.md#11-로그인회원가입과-https-배포)을 확인하며, 초기 파일 API 설치 기록·모의 테스트·실제 회원 로그인을 구분합니다.
 
 ## 1. 지원하는 동작
 
@@ -20,7 +20,7 @@
 
 ## 2. 요청·응답 계약
 
-모든 POST 요청은 `Content-Type: application/json`을 사용합니다. 경로에는 `/api`나 `/v1` 접두사가 없습니다. 공개 앱용 기본 주소는 HTTPS 구성 후 결정합니다.
+모든 POST 요청은 `Content-Type: application/json`을 사용합니다. 경로에는 `/api`나 `/v1` 접두사가 없습니다. 공개 앱용 기본 주소는 `https://vpn.xixiplay.com`입니다.
 
 | 메서드 / 경로 | 요청 | 성공 응답 |
 | --- | --- | --- |
@@ -119,20 +119,24 @@ refresh token은 한 번만 사용할 수 있습니다. 정상 갱신 시 기존
 
 ## 4. Google Cloud가 없는 경우 설정 순서
 
-2026-09-29 확인한 Google 공식 문서를 기준으로 작성했습니다. Google 콘솔의 메뉴 표기는 바뀔 수 있습니다. 아래 작업은 계정 소유자가 자신의 Google 계정으로 진행하며 비밀번호나 클라이언트 시크릿을 채팅으로 전달할 필요가 없습니다.
+2026-09-30 확인한 Google 공식 문서와 Google Sign-In iOS SDK `9.2.0`의 설정 계약을 기준으로 작성했습니다. Google 콘솔의 메뉴 표기는 바뀔 수 있습니다. 아래 작업은 계정 소유자가 자신의 Google 계정으로 진행하며 비밀번호나 클라이언트 시크릿을 채팅으로 전달할 필요가 없습니다.
 
 1. [Google Cloud 콘솔](https://console.cloud.google.com/)에서 프로젝트 선택 → 새 프로젝트를 열고 고전한입용 프로젝트를 만듭니다. 생성된 프로젝트를 선택합니다. [Google 프로젝트 생성 안내](https://developers.google.com/workspace/guides/create-project)
 2. **Google Auth Platform → Branding**에서 시작하기를 누르고 앱 이름, 지원 이메일, 연락 이메일을 설정합니다. 일반 사용자 서비스에 맞춰 Audience를 External로 구성하고 개발 중에는 테스트 사용자를 등록합니다. Data Access에는 로그인에 필요한 `openid`, 이메일, 기본 프로필만 사용하며 Drive·Gmail 접근 권한을 추가하지 않습니다. 공개 전에는 실제 서비스 정보와 콘솔에서 요구하는 검증을 완료합니다. [Google 동의 화면 설정 안내](https://developers.google.com/workspace/guides/configure-oauth-consent)
 3. **Clients → Create client → iOS**를 선택합니다. Xcode의 **ClassicBites 앱 타깃**에서 현재 Bundle Identifier를 확인해 입력합니다. 프레임워크 타깃의 식별자를 사용하지 않습니다. 콘솔이 추가 앱 정보를 요구하면 실제 배포 설정에서 확인하고 추측하지 않습니다. 생성된 iOS client ID와 표시되는 iOS URL scheme을 기록합니다.
-4. 같은 프로젝트에서 **Web application** 유형 클라이언트를 하나 더 만듭니다. 이 ID가 백엔드용 audience입니다. 이 구현은 iOS SDK에서 받은 ID token을 검증하므로 백엔드 OAuth callback URL을 새로 만들지 않습니다. 웹 클라이언트의 비밀키를 iOS 앱에 넣지 않습니다. [Google 클라이언트 생성 안내](https://support.google.com/cloud/answer/15549257)
+4. 권장 구성은 같은 프로젝트에서 **Web application** 유형 클라이언트를 하나 더 만들고 이 ID를 백엔드용 audience로 사용하는 것입니다. iOS 클라이언트만 사용하는 native 구성도 아래 조건으로 지원합니다. 이 구현은 iOS SDK에서 받은 ID token을 검증하므로 백엔드 OAuth callback URL을 새로 만들지 않습니다. 웹 클라이언트의 비밀키를 iOS 앱에 넣지 않습니다. [Google 클라이언트 생성 안내](https://support.google.com/cloud/answer/15549257)
 5. 아래 표에 맞춰 iOS와 백엔드 설정을 연결합니다. iOS에서는 Google Sign-In 공식 패키지를 연결하고, 로그인 후 앱으로 돌아오는 URL을 SDK에 전달해야 합니다. 구체적인 코드와 패키지 버전은 UI 연결 시 현재 프로젝트와 공식 문서를 확인해 정합니다. [Google iOS 설정 안내](https://developers.google.com/identity/sign-in/ios/start-integrating), [iOS 로그인 연결 안내](https://developers.google.com/identity/sign-in/ios/sign-in)
 
-| 설정 위치 | 값 |
-| --- | --- |
-| iOS `GIDClientID` | iOS 유형 OAuth client ID |
-| iOS `GIDServerClientID` | Web application 유형 OAuth client ID |
-| iOS URL Types → URL Schemes | iOS client ID의 점 구분 순서를 뒤집은 값; Google 콘솔의 iOS URL scheme과 일치 |
-| 서버 `.env`의 `GOOGLE_CLIENT_IDS` | 위 **Web application** ID. 여러 환경을 의도적으로 허용하면 쉼표로 구분 |
+| 설정 위치 | Web application audience 구성 (권장) | iOS client ID만 사용하는 native 구성 |
+| --- | --- | --- |
+| iOS `GIDClientID` | iOS 유형 OAuth client ID | iOS 유형 OAuth client ID |
+| iOS `GIDServerClientID` | Web application 유형 OAuth client ID | 생략; SDK 설정에는 `nil` 사용 |
+| iOS URL Types → URL Schemes | iOS client ID의 점 구분 순서를 뒤집은 값; Google 콘솔의 iOS URL scheme과 일치 | 동일 |
+| 서버 `.env`의 `GOOGLE_CLIENT_IDS` | 위 **Web application** ID | 위 **iOS** client ID |
+
+Google Sign-In iOS SDK `9.2.0`의 `serverClientID`는 선택값입니다. 서버 ID 없이 iOS client ID로 설정할 수 있으며, 공식 iOS 예제도 이 설정으로 ID token을 받습니다. 앱에서 서버 ID 누락만으로 Google 인증창을 막지 않습니다. 빈 설정값은 `nil`로 처리하고, 서버 ID를 명시한다면 실제 Web application ID를 사용합니다. iOS ID를 `GIDServerClientID`에 복사하는 방식으로 대체하지 않습니다. [SDK 설정 계약](https://github.com/google/GoogleSignIn-iOS/blob/9.2.0/GoogleSignIn/Sources/Public/GoogleSignIn/GIDConfiguration.h), [Google의 iOS client ID 설정·ID token 예제](https://firebase.google.com/docs/auth/ios/google-signin#implement_google_sign-in)
+
+이 백엔드의 `GoogleVerifier`는 클라이언트 유형을 Web application으로 제한하지 않고 ID token의 `aud`가 `GOOGLE_CLIENT_IDS` 허용 목록에 있는지 검사합니다. 서버 ID를 생략한 native 구성에서는 iOS ID를, 서버 ID를 지정한 구성에서는 Web application ID를 허용해야 합니다. 여러 앱·환경을 지원한다면 의도적으로 허용할 ID만 쉼표로 구분합니다. 허용 목록 누락·audience 불일치를 해결하기 위해 서명·issuer·만료·audience 검증을 끄지 않습니다. [Google의 audience 검증 안내](https://developers.google.com/identity/sign-in/ios/backend-auth#verify-the-integrity-of-the-id-token)
 
 백엔드는 Google의 서명·issuer·만료·허용 audience를 확인하고 `sub`를 Google 계정의 식별자로 사용합니다. ID token 검증에는 Google client secret이 필요하지 않습니다. 요청받은 Google 계정이 처음이라면 검증된 이메일 claim이 있어야 가입됩니다. 이미 아는 `sub`는 저장된 회원으로 로그인하며 초기 이메일을 자동 변경하지 않습니다. Gmail 또는 Google Workspace에서 이메일 소유권을 확인할 수 있는 계정만 `email_verified=true`로 저장하고, 외부 이메일을 쓰는 Google 계정은 `false`로 유지합니다. 이는 Google 로그인 성공 여부와 별개입니다. [Google 백엔드 인증 안내](https://developers.google.com/identity/sign-in/ios/backend-auth)
 
@@ -142,7 +146,7 @@ Google에서 승인된 후에도 서비스 내부 이메일이 다른 계정에 
 
 인증 기능은 기본적으로 꺼져 있습니다. 새 설치 예시와 초기화 도구는 `AUTH_ENABLED=false`를 준비하며, 기존 `.env`에 이 키가 없을 때에도 `./stack.sh install`은 `false`로 추가합니다. 이미 있는 값은 유지하고 프로세스·Compose에서 환경 변수가 누락되어도 비활성화합니다. 실제 `.env`를 저장소·문서·채팅에 복사하지 않습니다.
 
-아래는 **나중에 인증 기능을 적용할 때의 절차**이며 이번 문서 작성으로 서버에 실행한 명령이 아닙니다. 코드가 대상 서버에 전달되고 접속 경로가 준비된 뒤, 서버의 저장소 루트에서 실행합니다.
+아래는 최초 설치용 절차입니다. 기존 정상 서비스에 API만 적용할 때는 [README의 FastAPI 전용 HTTPS 적용 절차](../README.md#기존-nginx를-통한-https-적용)를 사용합니다. 현재 서버에는 HTTPS와 인증을 적용했으며 이후 갱신에도 기존 `.env`와 볼륨을 보존합니다.
 
 ```sh
 ./stack.sh install
@@ -176,9 +180,9 @@ docker compose run --rm --no-deps fastapi python migrate_auth.py
 | `AUTH_ACCESS_TTL_SECONDS` | 기본 `900` |
 | `AUTH_REFRESH_TTL_SECONDS` | 기본 `2592000`; 최초 세션부터의 절대 최대 수명 |
 | `AUTH_RATE_LIMIT_SALT` | 설치 과정에서 생성하는 비밀 난수; 예시값을 실제 환경에 쓰지 않음 |
-| `GOOGLE_CLIENT_IDS` | 허용할 Web application client ID 목록; 비어 있으면 Google 인증은 설정 오류로 응답 |
+| `GOOGLE_CLIENT_IDS` | 앱의 ID token audience와 일치하는 허용 목록: 서버 ID 지정 시 Web application ID, 서버 ID 생략 시 iOS ID; 비어 있으면 Google 인증은 설정 오류로 응답 |
 
-이메일 로그인과 회원가입도 비밀번호·세션 토큰을 전송하므로 공개 인터넷에서는 HTTPS가 필요합니다. README에 기록된 기존 공개 HTTP 주소를 실제 회원 인증용 기본 주소로 사용하지 않습니다. 개발 중에는 개발용 계정과 Mac의 loopback에 묶인 SSH 터널을 통한 iOS Simulator 연결을 사용할 수 있습니다. 실기기의 `127.0.0.1`은 Mac이 아니므로 같은 주소로 연결되지 않습니다. 실기기 연결은 신뢰할 수 있는 HTTPS 개발 주소가 준비된 뒤 검증합니다.
+이메일 로그인과 회원가입도 비밀번호·세션 토큰을 전송하므로 공개 인터넷에서는 현재 HTTPS 주소를 사용합니다. 초기 설치 기록의 공개 HTTP 주소는 실제 회원 인증용 기본 주소가 아닙니다. 개발 중에는 개발용 계정과 Mac의 loopback에 묶인 SSH 터널을 통한 iOS Simulator 연결을 사용할 수 있습니다. 실기기의 `127.0.0.1`은 Mac이 아니므로 같은 주소로 연결되지 않습니다. 실기기는 `https://vpn.xixiplay.com`으로 연결해 검증합니다.
 
 iOS에서 전체 HTTP를 허용하는 `NSAllowsArbitraryLoads` 설정을 추가해 우회하지 않습니다. 필요한 개발 환경 설정은 Debug 범위와 해당 로컬 연결로 제한하고 실제 동작을 확인합니다. 인증 토큰을 URL 쿼리·로그·분석 이벤트에 남기지 않습니다.
 
@@ -189,7 +193,7 @@ iOS에서 전체 HTTP를 허용하는 `NSAllowsArbitraryLoads` 설정을 추가�
 - access token 만료 후 갱신 성공, 동시 요청에서도 refresh 한 번만 실행, 새 토큰 쌍의 Keychain 교체.
 - 만료·해제된 refresh token, 사용한 refresh token 재사용, 갱신 응답 유실 시 안전한 재로그인.
 - 로그아웃 후 `/auth/me` 거부, 앱 재실행 후 로그인 화면, 로그아웃 통신 실패 안내.
-- Google 첫 가입과 재로그인, `is_new_user` 분기, 기존 이메일 충돌, Google 창 취소, 다른 client ID·만료된 ID token 거부.
+- Google 첫 가입과 재로그인, `is_new_user` 분기, 기존 이메일 충돌, Google 창 취소, 선택한 구성의 audience 허용과 다른 client ID·만료된 ID token 거부. native 구성에서는 Web ID 없이 인증창이 열리고 서버가 iOS audience를 검증하는지 확인.
 - 오프라인·타임아웃·429·503에서 로딩 해제와 재시도 안내; 실패를 로그인 성공으로 표시하지 않음.
 - iPhone·iPad에서 Google 인증창 표시와 앱 복귀, 기존 UI·접근성·키보드 동작 유지.
 

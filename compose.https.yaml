@@ -1,0 +1,27 @@
+# Apply together with compose.yaml; Docker Compose 2.24.4+ is required for !override.
+services:
+  fastapi:
+    ports: !override
+      - "127.0.0.1:${FASTAPI_PORT:-8000}:8000"
+    command:
+      - python
+      - -m
+      - uvicorn
+      - main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - "${AUTH_TRUSTED_PROXY_IP:?Set the existing nginx container IP}"
+    networks:
+      default: {}
+      proxy:
+        aliases:
+          - classic-bites-api
+
+networks:
+  proxy:
+    external: true
+    name: xixicash-net
