@@ -42,17 +42,47 @@ python api/import_daehak.py --content api/content/daehak.json --apply
 
 이미 실행 중인 서버에는 두 파일만 별도 콘텐츠 디렉터리에 전달하고, FastAPI 컨테이너의 임시 경로로 복사해 기존 `/app`의 DB 연결 코드를 사용한다. 데이터 등록만을 위해 이미지를 바꾸거나 컨테이너를 재시작하지 않는다. 서버의 카탈로그 백업을 먼저 확보하며 실제 `.env`·DB 백업은 로컬로 복사하지 않는다.
 
+## 한자 제목과 병음
+
+2026-09-30 후속 요청으로 작품 `大學 / dà xué`, 11개 장의 한자·병음 제목, 34개 한입의 성조 병음을 추가했다. 본문 한자 1,887자에 음절을 하나씩 대응시키고 구두점·문단을 유지했다. 원문·한국어 제목·번역·해설·순서·공개 상태는 기존 값 그대로다. 장 제목은 기존 한국어 목차에 대응하는 편집 제목이다.
+
+[pypinyin 0.55.0](https://pypi.org/project/pypinyin/0.55.0/)을 일회성 초안 작성에 사용한 뒤 원전 주석과 사전의 문맥별 독음을 대조했다. 앱·서버의 실행 의존성으로 추가하지 않았다. 현대 보통화 성조 부호를 쓰고, `一 yī`·`不 bù` 및 3성 연속은 원음 성조로 통일한다. 고대 중국어 복원음이나 송대 낭독음을 재현하는 자료는 아니다. 어휘 단위 정식 분철 대신 한자별 음절을 띄어 학습용 원문과 대조할 수 있게 했다.
+
+| 문맥 | 적용한 독음 |
+| --- | --- |
+| 大甲, 於戲 | tài jiǎ, wū hū |
+| 緡蠻, 淇澳 | mián mán, qí yù |
+| 惡惡臭, 好好色 | wù è chòu, hào hǎo sè |
+| 自謙, 心廣體胖 | zì qiè, xīn guǎng tǐ pán |
+| 弟者 / 兄弟 | tì zhě / xiōng dì |
+| 絜矩, 迸諸四夷 | xié jǔ, bǐng zhū sì yí |
+| 儀監于殷, 退而不能遠 | yí jiàn yú yīn, tuì ér bù néng yuàn |
+
+`親民 qīn mín`·`身 shēn`·`命 mìng`은 주석의 교정 글자로 몰래 바꾸지 않았다. 지역·전통 낭독에 이견이 있는 부분은 이번 편집 기준을 명시한다. `菉 lù`, `自謙 qiè`, `好樂 hào lè`, `厭然 yàn rán`을 택했으며 각각 lǜ·qiàn·hào yào·yǎn rán 등 다른 독법을 모두 오류로 단정하지 않는다. `迸 bǐng`은 [교육부 이체자 자전의 해당 대학 용례](https://dict.variants.moe.edu.tw/dictView.jsp?ID=72881&la=0), `遠 yuàn`은 [현대 사전의 피하다 독음](https://zdic.net/hans/远)과 원전 주석을 참고했다. 전문 감수 전 초안이며 운영 작품의 `review_status=draft`를 유지한다.
+
+[`api/fill_daehak_pinyin.py`](../api/fill_daehak_pinyin.py)는 **별도 배포된 한자·병음 확장 스키마가 이미 있는 환경**에서 사용한다. 이 브랜치의 API `1.3.0`·기본 마이그레이션만으로 병음 API가 제공되는 것은 아니다. 도구가 스키마를 만들거나 API를 배포하지 않으며 필요한 컬럼이 없으면 거부한다. 최초 본문 등록 도구도 계속 병음을 수정하지 않는다.
+
+```sh
+python api/fill_daehak_pinyin.py --content api/content/daehak.json
+python api/fill_daehak_pinyin.py --content api/content/daehak.json --apply
+```
+
+기본 실행은 계획만 반환한다. `--apply`는 기존 부모·전체 장/한입 ID·원문을 잠금 조회한 뒤 빈 한자 제목·병음 제목·본문 병음만 원자적으로 채운다. 같은 병음은 무변경, 다른 기존 읽기 값이나 원문·계층 충돌은 전체 중단한다. 비어 있는 판본·출처 URL·병음 작성 출처도 채우지만 이미 작성된 출처와 검수 상태는 보존한다. 한국어 제목·번역·해설·정렬·공개 상태를 수정하지 않는다. 등록에는 이 도구와 `import_daehak.py`, 콘텐츠 JSON이 필요하며 서버의 비공개 백업을 먼저 확보한다.
+
 ## 검증
 
 기존 Python 3.13 가상환경에서 실행한다. MySQL 검사는 독립된 임시 `mysql:8.4` 컨테이너를 사용하고 제거하며 운영 DB·환경 파일·볼륨은 사용하지 않는다.
 
 ```sh
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-daehak-import.py
+PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-daehak-pinyin.py
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog.py
 PYTHONDONTWRITEBYTECODE=1 .venv/bin/python scripts/check-catalog-mysql.py
 git diff --check
 ```
 
 등록 검사에는 계획 확인의 무변경, 완본 저장과 재실행, 공개 API 정렬·준비 상태·본문, 기존 편집·비공개·다른 목차·부분 등록·UUID 충돌 보존, 부모 검증, 실제 중간 INSERT 실패 시 전체 롤백, 병음 보존, 잘못된 파일 거부가 포함된다. 콘텐츠 파일 전체의 등록과 재조회도 검사한다.
+
+병음 검사 11개는 실제 34한입 저장, 부분 보완·동일 값 재실행, 원문·부모·병음 충돌 거부, 기존 출처·검수 상태·편집 보존, 동시 원문 수정 보호·두 등록의 직렬화, 중간 SQL 실패 롤백, 스키마 누락 거부를 확인한다. 테스트 내부에서만 확장 컬럼을 준비하며 다른 worktree나 운영 마이그레이션에 의존하지 않는다. 2026-09-30 병음 등록·기존 본문 등록·카탈로그 API·카탈로그 MySQL 검사 총 39개를 통과했다.
 
 사용자 확인 동선은 iOS의 서재 → 사서오경 → 대학 → 장 → 한입이다. 이미 대학 화면이 열려 있다면 나갔다가 다시 들어가거나 새로고침해 목록을 재조회한다. 자동 API 검증과 실제 기기 화면·전문가 감수·사용자 테스트 승인은 구분한다.
