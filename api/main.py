@@ -50,7 +50,7 @@ def create_app(settings: Settings | None = None, storage=None, *,
                 pool.clear()
 
     application = FastAPI(
-        title="Classic Bites API", version="1.3.0", lifespan=lifespan,
+        title="Classic Bites API", version="1.4.0", lifespan=lifespan,
         description="Email/password and Google authentication use UserAccessToken. Media CRUD remains admin-only with MEDIA_API_KEY; user login does not grant media administration.",
     )
     application.add_middleware(MediaGuardMiddleware)

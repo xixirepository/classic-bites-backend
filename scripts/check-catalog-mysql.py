@@ -6,6 +6,7 @@ from pathlib import Path
 import sys
 import unittest
 import uuid
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -19,6 +20,22 @@ from catalog import CatalogSettings, router
 from catalog_store import CatalogConflict, CatalogNotFound, CatalogStore
 from migrate_auth import migrate as migrate_auth
 from migrate_catalog import CLASSICS_ID, CLASSIC_WORKS, migrate
+
+LEGACY_IDS = [str(uuid.uuid4()) for _ in range(4)]
+
+
+def migrate_from_legacy(connect):
+    """Exercise an actual 1.3 schema upgrade before the ordinary test suite."""
+    with connect() as connection, connection.cursor() as cursor:
+        for statement in (ROOT / "api/migrations/002_catalog.sql").read_text().split(";"):
+            if statement.strip():
+                cursor.execute(statement)
+        cursor.execute("INSERT INTO catalog_books (id,title,description,is_published) VALUES (%s,'Legacy book','',1)", (LEGACY_IDS[0],))
+        cursor.execute("INSERT INTO catalog_works (id,book_id,title,description,is_published) VALUES (%s,%s,'Legacy work','',1)", tuple(LEGACY_IDS[:2][::-1]))
+        cursor.execute("INSERT INTO catalog_chapters (id,book_id,work_id,title,is_published) VALUES (%s,%s,%s,'Legacy chapter',1)", (LEGACY_IDS[2], LEGACY_IDS[0], LEGACY_IDS[1]))
+        cursor.execute("INSERT INTO catalog_bites (id,chapter_id,title,original,translation,commentary,is_published) VALUES (%s,%s,'Legacy bite','原文','기존 번역','기존 해설',1)", (LEGACY_IDS[3], LEGACY_IDS[2]))
+        connection.commit()
+    migrate(connect)
 
 
 def tests_for(connect):
@@ -168,6 +185,84 @@ def tests_for(connect):
             finally:
                 app.state.auth.close()
 
+        def test_legacy_upgrade_defaults_and_preserves_all_existing_text(self):
+            migrate(connect)
+            result = self.store.get_work_reader(LEGACY_IDS[1])
+            self.assertEqual(result["work"]["title"], "Legacy work")
+            self.assertEqual(result["work"]["title_hanzi"], "")
+            self.assertEqual(result["work"]["review_status"], "draft")
+            self.assertEqual(result["chapters"][0]["chapter"]["title_pinyin"], "")
+            bite = result["chapters"][0]["bites"][0]
+            self.assertEqual((bite["original"], bite["translation"], bite["commentary"], bite["pinyin"]),
+                             ("原文", "기존 번역", "기존 해설", ""))
+
+        def test_reading_metadata_and_long_pinyin_survive_reconnect_and_migration(self):
+            book, work, chapter, bite = self.tree()
+            self.update("works", work, title_hanzi="大學", title_pinyin="Dà Xué", source_edition="Test edition",
+                        source_url="https://example.com/source", pinyin_source="Test only", review_status="reviewed")
+            self.update("chapters", chapter, title_hanzi="一", title_pinyin="Yī")
+            long_pinyin = "míng " * 19000
+            self.update("bites", bite, original="明" * 19000, pinyin=long_pinyin)
+            migrate(connect)
+            reader = CatalogStore(connect).get_work_reader(work["id"])
+            self.assertEqual(reader["work"]["title_pinyin"], "Dà Xué")
+            self.assertEqual(reader["work"]["review_status"], "reviewed")
+            self.assertEqual(reader["work"]["source_edition"], "Test edition")
+            self.assertEqual(reader["chapters"][0]["chapter"]["title_hanzi"], "一")
+            body = reader["chapters"][0]["bites"][0]
+            self.assertEqual(body["pinyin"], long_pinyin)
+            self.assertEqual(body["translation"], bite["translation"])
+            self.assertEqual(body["commentary"], bite["commentary"])
+
+        def test_reader_orders_chapters_and_bites_and_uses_original_readiness(self):
+            book, work, first, original = self.tree()
+            second = self.create("chapters", book_id=book["id"], work_id=work["id"], sort_order=-1)
+            pending = self.create("bites", chapter_id=second["id"], translation="기존 번역", pinyin="míng")
+            extra = self.create("bites", chapter_id=first["id"], original="明", sort_order=-1)
+            tied = self.create("bites", chapter_id=first["id"], original="明", sort_order=-1)
+            reader = self.store.get_work_reader(work["id"])
+            self.assertEqual([row["chapter"]["id"] for row in reader["chapters"]], [second["id"], first["id"]])
+            self.assertFalse(reader["chapters"][0]["chapter"]["is_ready"])
+            self.assertFalse(reader["chapters"][0]["bites"][0]["is_ready"])
+            self.assertTrue(self.store.get_detail("bites", pending["id"])["bite"]["is_ready"])
+            self.assertEqual([row["id"] for row in reader["chapters"][1]["bites"]],
+                             sorted([extra["id"], tied["id"]]) + [original["id"]])
+            self.assertTrue(reader["work"]["is_ready"])
+            self.update("chapters", first, is_published=False)
+            self.assertFalse(self.store.get_work_reader(work["id"])["work"]["is_ready"])
+
+        def test_reader_filters_every_ancestor_and_draft_descendant(self):
+            for kind, index in (("books", 0), ("works", 1), ("chapters", 2), ("bites", 3)):
+                with self.subTest(hidden=kind):
+                    rows = self.tree()
+                    self.update(kind, rows[index], is_published=False)
+                    if index < 2:
+                        with self.assertRaises(CatalogNotFound):
+                            self.store.get_work_reader(rows[1]["id"])
+                    else:
+                        result = self.store.get_work_reader(rows[1]["id"])
+                        self.assertFalse(result["work"]["is_ready"])
+                        self.assertEqual(result["chapters"] if index == 2 else result["chapters"][0]["bites"], [])
+
+        def test_reader_shares_snapshot_across_work_chapters_and_bites(self):
+            book, work, chapter, bite = self.tree()
+            original_rows = self.store._rows
+            changed = False
+
+            def rows_then_unpublish(*args, **kwargs):
+                nonlocal changed
+                result = original_rows(*args, **kwargs)
+                if not changed:
+                    changed = True
+                    self.update("chapters", chapter, is_published=False)
+                return result
+
+            with patch.object(self.store, "_rows", side_effect=rows_then_unpublish):
+                snapshot = self.store.get_work_reader(work["id"])
+            self.assertEqual(snapshot["chapters"][0]["bites"][0]["id"], bite["id"])
+            self.assertTrue(snapshot["work"]["is_ready"])
+            self.assertEqual(self.store.get_work_reader(work["id"])["chapters"], [])
+
     return unittest.defaultTestLoader.loadTestsFromTestCase(CatalogMySQLTests)
 
 
@@ -176,7 +271,7 @@ def main():
     spec = importlib.util.spec_from_file_location("auth_mysql_runner", ROOT / "scripts/check-auth-mysql.py")
     runner = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(runner)
-    runner.migrate = migrate
+    runner.migrate = migrate_from_legacy
     runner.tests_for = tests_for
     return runner.main()
 
