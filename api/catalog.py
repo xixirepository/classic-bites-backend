@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from auth import current_user, failure
+from catalog_learning import BiteLearning
 from catalog_store import CatalogConflict, CatalogNotFound
 
 
@@ -94,6 +95,7 @@ class BiteInput(EntityInput):
     pinyin: str = Field(default="", max_length=100000)
     translation: str = Field(default="", max_length=100000)
     commentary: str = Field(default="", max_length=100000)
+    learning: BiteLearning | None = None
 
     @field_validator("original", "pinyin", "translation", "commentary", mode="before")
     @classmethod
@@ -126,7 +128,7 @@ def serialize_entity(entity, kind, public=True, summary=False):
         for field in ("source_edition", "source_url", "pinyin_source", "review_status"):
             result.pop(field, None)
     if summary:
-        for field in ("original", "pinyin", "translation", "commentary"):
+        for field in ("original", "pinyin", "translation", "commentary", "learning"):
             result.pop(field, None)
     return result
 
@@ -149,11 +151,17 @@ def detail(store, kind, item_id, public):
 
 def save(store, kind, data, item_id=None):
     try:
-        result = store.save(kind, data.model_dump(mode="json"), str(item_id) if item_id else None)
+        # Old admin clients do not know every newer field. An omitted PUT field
+        # must survive, including readings, provenance and learning supplements.
+        result = store.save(kind, data.model_dump(mode="json", exclude_unset=item_id is not None),
+                            str(item_id) if item_id else None)
     except CatalogNotFound:
         raise failure(404, "content_not_found", "콘텐츠를 찾을 수 없습니다.") from None
     except CatalogConflict as exc:
-        message = "상위 콘텐츠는 생성 후 변경할 수 없습니다." if exc.code == "parent_immutable" else "상위 콘텐츠 연결을 확인해 주세요."
+        if exc.code == "learning_source_mismatch":
+            message = "학습 단락의 원문·병음이 한입 본문과 일치하는지 확인해 주세요."
+        else:
+            message = "상위 콘텐츠는 생성 후 변경할 수 없습니다." if exc.code == "parent_immutable" else "상위 콘텐츠 연결을 확인해 주세요."
         raise failure(409, exc.code, message) from None
     singular = {"books": "book", "works": "work", "chapters": "chapter", "bites": "bite"}[kind]
     return detail(store, kind, result[singular]["id"], public=False)

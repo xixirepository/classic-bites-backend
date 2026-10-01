@@ -2,6 +2,7 @@
 """Catalogue HTTP contracts and authorization without external services."""
 
 from datetime import datetime, timezone
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 import sys
@@ -34,6 +35,7 @@ class RecordingStore:
         self.public_calls = []
         self.ready = False
         self.saved = None
+        self.learning = None
 
     def list_books(self, public=True):
         self.public_calls.append(public)
@@ -46,7 +48,7 @@ class RecordingStore:
             raise CatalogNotFound()
         if kind == "bites":
             return {"bite": {"id": BITE_ID, "title": "Test", "chapter_id": BOOK_ID,
-                             "original": "", "pinyin": "míng", "translation": "", "commentary": "", "sort_order": 0,
+                             "original": "", "pinyin": "míng", "translation": "", "commentary": "", "learning": self.learning, "sort_order": 0,
                              "is_ready": self.ready, "is_published": True}}
         if kind == "works":
             return {"work": {**self.list_books(public)[0], "id": WORK_ID, "book_id": BOOK_ID,
@@ -204,6 +206,36 @@ class CatalogHTTPTests(unittest.TestCase):
         self.assertEqual(self.store.saved[1]["translation"], "보존할 번역")
         self.assertEqual(self.store.saved[1]["commentary"], "보존할 해설")
         self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json={**bite, "pinyin": "x" * 100001}).status_code, 422)
+
+    def test_learning_response_and_omitted_edit_fields(self):
+        learning = {"version": 1, "source_note": "검사용 설명", "units": [{
+            "id": "first", "title": "밝음", "original": "明", "pinyin": "míng",
+            "opening_question": "밝다는 것은?", "glossary": [{"term": "明", "reading": "명", "meaning": "밝다"}],
+            "translation": "밝다", "summary": "밝음의 뜻", "everyday_example": "오늘의 예시",
+            "check": {"question": "뜻은?", "choices": ["밝다", "어둡다"], "answer_index": 0, "explanation": "명은 밝음입니다."}}]}
+        self.store.learning = learning
+        self.store.ready = True
+        self.assertEqual(self.client.get(f"/catalog/bites/{BITE_ID}").json()["bite"]["learning"], learning)
+        reader = self.client.get(f"/catalog/works/{WORK_ID}/reader").json()
+        self.assertEqual(reader["chapters"][0]["bites"][0]["learning"], learning)
+        self.assertNotIn("learning", self.client.get(f"/catalog/chapters/{CHAPTER_ID}").json()["bites"][0])
+        self.authorize()
+        base = {"title": "수정 제목", "chapter_id": CHAPTER_ID}
+        self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json=base).status_code, 200)
+        self.assertEqual(self.store.saved[1], base)
+        self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json={**base, "learning": None}).status_code, 200)
+        self.assertIn("learning", self.store.saved[1])
+        self.assertIsNone(self.store.saved[1]["learning"])
+        response = self.client.put(f"/admin/api/bites/{BITE_ID}", json={**base, "learning": learning})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.store.saved[1]["learning"], learning)
+        invalid = deepcopy(learning)
+        invalid["units"][0]["check"]["answer_index"] = 2
+        self.assertEqual(self.client.put(f"/admin/api/bites/{BITE_ID}", json={**base, "learning": invalid}).status_code, 422)
+        with patch.object(self.store, "save", side_effect=CatalogConflict("learning_source_mismatch")):
+            response = self.client.put(f"/admin/api/bites/{BITE_ID}", json=base)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["detail"]["code"], "learning_source_mismatch")
 
 
 if __name__ == "__main__":

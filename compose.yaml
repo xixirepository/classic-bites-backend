@@ -64,7 +64,7 @@ services:
     <<: *common
     build:
       context: ./api
-    image: classic-bites-fastapi:1.4.0
+    image: classic-bites-fastapi:1.5.0
     environment:
       MYSQL_HOST: mysql
       MYSQL_PORT: "3306"

@@ -1,10 +1,12 @@
 """Persistent catalogue with ancestor visibility enforced on every public query."""
 
 from contextlib import contextmanager
+import json
 import uuid
 
 import pymysql
 from auth_store import mysql_connect_from_env
+from catalog_learning import decode_learning, validate_learning
 
 
 class CatalogNotFound(Exception):
@@ -21,13 +23,13 @@ COLUMNS = {
     "works": ("id", "book_id", "title", "title_hanzi", "title_pinyin", "description", "cover_key", "sort_order", "is_published",
               "source_edition", "source_url", "pinyin_source", "review_status"),
     "chapters": ("id", "book_id", "work_id", "title", "title_hanzi", "title_pinyin", "sort_order", "is_published"),
-    "bites": ("id", "chapter_id", "title", "original", "pinyin", "translation", "commentary", "sort_order", "is_published"),
+    "bites": ("id", "chapter_id", "title", "original", "pinyin", "translation", "commentary", "learning", "sort_order", "is_published"),
 }
 READING_DEFAULTS = {
     "works": {"title_hanzi": "", "title_pinyin": "", "source_edition": "", "source_url": "",
               "pinyin_source": "", "review_status": "draft"},
     "chapters": {"title_hanzi": "", "title_pinyin": ""},
-    "bites": {"pinyin": ""},
+    "bites": {"pinyin": "", "learning": None},
 }
 PARENTS = {"books": (), "works": ("book_id",), "chapters": ("book_id", "work_id"), "bites": ("chapter_id",)}
 # Every alias is static code, never request input. LEFT JOIN keeps direct chapters.
@@ -93,6 +95,8 @@ class CatalogStore:
         for row in cursor.fetchall():
             row["is_ready"] = bool(row["is_ready"])
             row["is_published"] = bool(row["is_published"])
+            if kind == "bites":
+                row["learning"] = decode_learning(row.get("learning"))
             result.append(row)
         return result
 
@@ -150,12 +154,15 @@ class CatalogStore:
                     current = cursor.fetchone()
                     if current is None:
                         raise CatalogNotFound()
-                    if any(current[key] != data.get(key) for key in PARENTS[kind]):
+                    if any(key in values and current[key] != values[key] for key in PARENTS[kind]):
                         raise CatalogConflict("parent_immutable")
+                    data = {**current, **values}
+                    self._prepare_learning(kind, data)
                     columns = [key for key in COLUMNS[kind] if key not in ("id", "cover_key")]
                     cursor.execute("UPDATE catalog_" + kind + " SET " + ", ".join(key + "=%s" for key in columns)
                                    + " WHERE id=%s", tuple(data[key] for key in columns) + (item_id,))
                 else:
+                    self._prepare_learning(kind, data)
                     columns = [key for key in COLUMNS[kind] if key != "cover_key"]
                     data["id"] = target_id
                     cursor.execute("INSERT INTO catalog_" + kind + " (" + ", ".join(columns) + ") VALUES ("
@@ -165,6 +172,16 @@ class CatalogStore:
                 raise CatalogConflict() from None
             raise
         return self.get_detail(kind, target_id, public=False)
+
+    @staticmethod
+    def _prepare_learning(kind, data):
+        if kind != "bites":
+            return
+        try:
+            learning = validate_learning(data.get("learning"), data["original"], data["pinyin"])
+        except (ValueError, TypeError):
+            raise CatalogConflict("learning_source_mismatch") from None
+        data["learning"] = json.dumps(learning, ensure_ascii=False) if learning is not None else None
 
     def set_cover(self, kind, item_id, key):
         if kind not in ("books", "works"):

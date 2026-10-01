@@ -29,9 +29,9 @@
 | Work | Book 필드 + `book_id: UUID 문자열`, `title_hanzi`, `title_pinyin`: 각각 문자열 |
 | Chapter | 공통 + `book_id: UUID 문자열`, `work_id: UUID 문자열 또는 null`, `title_hanzi`, `title_pinyin`: 각각 문자열 |
 | BiteSummary | 공통 + `chapter_id: UUID 문자열` |
-| BiteDetail | BiteSummary + `original`, `pinyin`, `translation`, `commentary`: 각각 문자열 |
+| BiteDetail | BiteSummary + `original`, `pinyin`, `translation`, `commentary`: 각각 문자열, `learning`: 학습 객체 또는 null |
 
-공개 응답에는 `is_published`와 MinIO `cover_key`를 포함하지 않는다. 관리자 응답에는 `is_published`가 추가되고 Book·Work에는 내부 관리용 `cover_key`도 포함한다. 한입 목록은 관리자에서도 본문을 제외한 요약이며 편집 시 한입 상세를 조회한다.
+공개 응답에는 `is_published`와 MinIO `cover_key`를 포함하지 않는다. 관리자 응답에는 `is_published`가 추가되고 Book·Work에는 내부 관리용 `cover_key`도 포함한다. 한입 목록은 관리자에서도 본문과 `learning`을 제외한 요약이며 편집 시 한입 상세를 조회한다. 이전 API의 `learning` 누락과 새 API의 null은 모두 학습 자료가 없는 상태다.
 
 관리자 Work에는 `source_edition`, `source_url`, `pinyin_source`, `review_status`도 포함하며 관리자 책 상세의 works 목록에도 동일하게 제공한다. 공개 API에서는 이 네 관리 필드를 제외한다. 한자·병음 제목과 병음은 아직 등록하지 않았으면 빈 문자열이며 null은 사용하지 않는다.
 
@@ -59,6 +59,37 @@ reader는 작품 선택 후 장마다 본문을 따로 요청할 필요 없이 �
 reader 안의 `is_ready`만 원문 기준이다. `original.strip()`이 비어 있지 않은 공개 한입을 준비 완료로 판단하며 작품·장은 그런 하위 한입의 존재로 계산한다. 병음·번역·해설만 있는 한입은 false이고 빈 장·빈 작품도 HTTP 200으로 준비 상태를 반환한다. 원문이 있는데 병음이 비어 있으면 원문을 표시하고 병음 준비 상태를 안내할 수 있다. 기존 일반 조회의 원문·번역·해설 기준 `is_ready`와 개별 한입의 `409 content_preparing` 계약은 변경하지 않는다.
 
 앱의 학습 콘텐츠는 작품·장의 `title_hanzi`/`title_pinyin`, 한입별 `original`/`pinyin`으로 표시한다. 기존 한국어 `title`·`translation`·`commentary`는 응답과 DB에 유지하며 한자·병음의 대체 본문으로 사용하지 않는다. 병음은 중국어 보통화 성조 부호를 포함한 유니코드 문자열을 그대로 저장한다. 자동 변환·발음 검수 기능은 없고 관리자가 검수된 읽기 단위의 원문과 병음을 짝으로 등록한다.
+
+### 초보자 학습 자료 `learning` · 소스 1.5.0
+
+한입 상세와 reader의 `learning`은 기존 한입에 덧붙이는 선택적 JSON이다. 책·작품·장·한입의 ID·목차·순서는 유지한다. 앱은 reader에 학습 자료가 있으면 장 목차와 학습 단위를 표시할 수 있으며 별도 작품명 분기나 작품 flag는 필요하지 않다. 학습 자료가 없는 한입은 기존 원문·병음·번역·해설을 사용한다. API의 준비 상태·공개 조상 검사는 바꾸지 않는다.
+
+```json
+{
+  "version": 1,
+  "source_note": "판본과 전문 감수 전 학습용 초안임을 설명하는 문구",
+  "units": [{
+    "id": "stable-unit-key",
+    "title": "학습 단위 제목",
+    "original": "明",
+    "pinyin": "míng",
+    "opening_question": "밝다는 것은 어떤 뜻일까요?",
+    "glossary": [{"term": "明", "reading": "명", "meaning": "밝다"}],
+    "translation": "쉽게 풀어 쓴 우리말",
+    "summary": "기억할 핵심 한 줄",
+    "everyday_example": "원문과 구분한 오늘의 생활 예시",
+    "check": {"question": "明의 뜻은?", "choices": ["밝다", "어둡다"],
+              "answer_index": 0, "explanation": "明은 밝다는 뜻입니다."}
+  }]
+}
+```
+
+- `version`은 정수 1, `units`는 한입마다 1~64개이며 `id`는 영문 소문자·숫자로 시작하는 `[a-z0-9_-]` 1~80자다. 한입 안에서 중복 ID를 허용하지 않는다. 확인 문제의 `answer_index`는 0부터 시작한다.
+- 단위 원문을 배열 순서대로 연결하고 공백·구두점을 제외하면 기존 한입 원문과 같아야 한다. 병음은 성조와 음절 경계를 유지한 채 같은 순서여야 한다. 대소문자와 구두점 배치는 비교에서 허용한다. 각 단위의 한자 수와 병음 음절 수도 같아야 한다. 간체·번체 변환이나 독음 생성은 서버가 수행하지 않는다.
+- `source_note` 4,000자, 단위 `title` 200자, `original` 12,000자, `pinyin` 24,000자, `opening_question` 1,000자, `translation` 12,000자, `summary` 2,000자, `everyday_example` 4,000자 이하다. 필수 문자열은 공백 제거 후 비어 있을 수 없다.
+- `glossary`는 1~16개다. 단어는 해당 단위 원문에 있어야 하며 중복을 허용하지 않는다. `term` 80자, `reading` 200자, `meaning` 1,000자 이하다. `reading`은 편집자가 등록한 읽기이며 음성 재생이나 자동 발음 검수 기능은 없다.
+- 문제는 1,000자, 선택지는 서로 다른 2~5개·각 1,000자, 풀이 4,000자 이하다. 정답은 존재하는 선택지를 가리켜야 한다. learning 전체는 UTF-8 JSON 512 KiB 이하이며 알 수 없는 필드와 잘못된 타입을 거부한다.
+- 학습 자료와 본문이 어긋나는 저장은 `409 learning_source_mismatch`다. 기존 learning을 유지한 채 원문·병음을 바꿀 때에도 검사한다. 구조·길이·정답 오류는 422다. 번역·해설은 학습용 풀이와 별도로 계속 보존한다.
 
 예시: 공개한 사서오경의 본문이 아직 없을 때도 목록에는 다음과 같이 나타난다. 이 UUID는 설명용 자리표시자이며 실제로는 서버 값을 사용한다.
 
@@ -95,7 +126,7 @@ reader 안의 `is_ready`만 원문 기준이다. `original.strip()`이 비어 �
 
 ## 생성·수정
 
-`POST /admin/api/{books|works|chapters|bites}`로 생성한다. UUID는 서버가 발급하고 HTTP 201을 반환한다. `PUT /admin/api/{종류}/{id}`로 수정하고 HTTP 200을 반환한다. 성공 응답 형태는 같은 항목의 관리자 상세 GET과 동일하다. PUT은 아래 필드 전체를 보내는 방식이며, 생략 가능한 필드는 기본값으로 바뀐다. 공개 상태를 보존하려면 기존 값을 명시해야 한다.
+`POST /admin/api/{books|works|chapters|bites}`로 생성한다. UUID는 서버가 발급하고 HTTP 201을 반환한다. `PUT /admin/api/{종류}/{id}`로 수정하고 HTTP 200을 반환한다. 성공 응답 형태는 같은 항목의 관리자 상세 GET과 동일하다. 소스 1.5.0의 PUT은 필수 제목·부모 ID를 포함하되 선택 필드를 생략하면 기존 DB 값을 보존한다. 원문·병음·번역·해설·출처·검수 상태·순서·공개 여부도 동일하다. 명시한 빈 문자열·false는 실제 수정이다. `learning`을 생략하면 보존하고 명시한 null은 제거한다. POST에서는 아래 기본값을 사용한다. 1.4.0 이전 PUT의 생략 필드 초기화 동작과 구분한다.
 
 | 대상 | JSON 필드 |
 | --- | --- |
@@ -103,7 +134,7 @@ reader 안의 `is_ready`만 원문 기준이다. `original.strip()`이 비어 �
 | books | `description` 기본 빈 문자열 |
 | works | `book_id` 필수, `description`, `title_hanzi`, `title_pinyin`, `source_edition`, `source_url`, `pinyin_source` 기본 빈 문자열, `review_status` 기본 `draft` |
 | chapters | `book_id` 필수, `work_id` 기본 null, `title_hanzi`, `title_pinyin` 기본 빈 문자열 |
-| bites | `chapter_id` 필수, `original`, `pinyin`, `translation`, `commentary` 기본 빈 문자열 |
+| bites | `chapter_id` 필수, `original`, `pinyin`, `translation`, `commentary` 기본 빈 문자열, `learning` 기본 null |
 
 - 제목은 앞뒤 공백 제거 후 1~200자이며 줄바꿈·제어문자를 허용하지 않는다.
 - 한자·병음 제목은 각각 0~200자이며 같은 공백·제어문자 규칙을 적용한다.
@@ -172,7 +203,7 @@ docker compose run --rm --no-deps fastapi python migrate_catalog.py
 docker compose run --rm --no-deps fastapi python migrate_catalog.py --seed-classics
 ```
 
-마이그레이션은 같은 데이터베이스의 동시 실행을 이름 잠금으로 직렬화하고 필수 컬럼을 검사한다. `002_catalog.sql`로 새 테이블의 기본키·외래키·정렬 인덱스를 준비하고 `003_hanzi_pinyin.sql`의 누락 컬럼을 추가한다. 기존 행의 새 문자열은 빈 값, 검수 상태는 `draft`가 되며 원문·번역·해설·제목·공개 상태는 보존한다. 적용 계정에 `ALTER` 권한이 필요하다. MySQL DDL은 전체 롤백되지 않으므로 중간 실패 시 원인을 고친 뒤 같은 명령을 재실행한다. 각 컬럼의 존재를 확인하므로 이미 추가된 컬럼은 다시 만들지 않는다. 기존 auth 테이블과 미디어 객체를 변경하지 않는다.
+마이그레이션은 같은 데이터베이스의 동시 실행을 이름 잠금으로 직렬화하고 필수 컬럼을 검사한다. `002_catalog.sql`로 새 테이블의 기본키·외래키·정렬 인덱스를 준비하고 `003_hanzi_pinyin.sql`과 `004_bite_learning.sql`의 누락 컬럼을 추가한다. `learning JSON NULL`은 기존 행에서 null이며 학습 원고를 자동 등록하지 않는다. 기존 행의 새 문자열은 빈 값, 검수 상태는 `draft`가 되며 원문·번역·해설·제목·공개 상태는 보존한다. 적용 계정에 `ALTER` 권한이 필요하다. MySQL DDL은 전체 롤백되지 않으므로 중간 실패 시 원인을 고친 뒤 같은 명령을 재실행한다. 각 컬럼의 존재를 확인하므로 이미 추가된 컬럼은 다시 만들지 않는다. 기존 auth 테이블과 미디어 객체를 변경하지 않는다.
 
 선택 seed는 고정된 UUID로 같은 항목을 반복 생성하지 않으며, 이미 등록한 항목의 제목·순서·공개 상태를 덮어쓰지 않는다. 본문·장·한입이나 임의 번역을 추가하지 않는다. 운영 백업·배포·환경 설정·관리자 지정은 별도 실제 적용 단계다. 로컬 테스트 통과를 운영 서버 적용으로 표현하지 않는다.
 

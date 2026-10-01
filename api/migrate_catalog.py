@@ -36,8 +36,9 @@ def migrate(connect=mysql_connect_from_env, *, seed=False):
     migrations = Path(__file__).with_name("migrations")
     statements = [statement.strip() for statement in migrations
                   .joinpath("002_catalog.sql").read_text(encoding="utf-8").split(";") if statement.strip()]
-    additions = [statement.strip() for statement in migrations
-                 .joinpath("003_hanzi_pinyin.sql").read_text(encoding="utf-8").split(";") if statement.strip()]
+    additions = [statement.strip() for filename in ("003_hanzi_pinyin.sql", "004_bite_learning.sql")
+                 for statement in migrations.joinpath(filename).read_text(encoding="utf-8").split(";")
+                 if statement.strip()]
     connection = connect()
     lock_name = None
     locked = False
