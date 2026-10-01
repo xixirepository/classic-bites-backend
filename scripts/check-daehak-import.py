@@ -180,15 +180,12 @@ def tests_for(connect):
                 self.execute("ALTER TABLE catalog_bites DROP CHECK fail_daehak_bite")
 
         def test_optional_future_columns_are_not_overwritten(self):
-            self.execute("ALTER TABLE catalog_bites ADD COLUMN pinyin MEDIUMTEXT NOT NULL DEFAULT ('')")
-            try:
-                self.apply()
-                self.execute("UPDATE catalog_bites SET pinyin=%s ORDER BY id LIMIT 1", ("dà xué",))
-                before = self.snapshot()
-                self.assertEqual(self.apply()["action"], "unchanged")
-                self.assertEqual(self.snapshot(), before)
-            finally:
-                self.execute("ALTER TABLE catalog_bites DROP COLUMN pinyin")
+            self.apply()
+            self.execute("UPDATE catalog_bites SET pinyin=%s ORDER BY id LIMIT 1", ("dà xué",))
+            self.execute("UPDATE catalog_bites SET learning=%s ORDER BY id LIMIT 1", ('{"test_only": "preserve"}',))
+            before = self.snapshot()
+            self.assertEqual(self.apply()["action"], "unchanged")
+            self.assertEqual(self.snapshot(), before)
 
         def test_invalid_content_is_rejected_before_opening_a_connection(self):
             mutations = [

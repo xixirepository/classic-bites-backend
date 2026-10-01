@@ -1,0 +1,9 @@
+ALTER TABLE catalog_works ADD COLUMN title_hanzi VARCHAR(200) NOT NULL DEFAULT '';
+ALTER TABLE catalog_works ADD COLUMN title_pinyin VARCHAR(200) NOT NULL DEFAULT '';
+ALTER TABLE catalog_works ADD COLUMN source_edition VARCHAR(1000) NOT NULL DEFAULT '';
+ALTER TABLE catalog_works ADD COLUMN source_url VARCHAR(2048) NOT NULL DEFAULT '';
+ALTER TABLE catalog_works ADD COLUMN pinyin_source VARCHAR(2000) NOT NULL DEFAULT '';
+ALTER TABLE catalog_works ADD COLUMN review_status VARCHAR(16) NOT NULL DEFAULT 'draft';
+ALTER TABLE catalog_chapters ADD COLUMN title_hanzi VARCHAR(200) NOT NULL DEFAULT '';
+ALTER TABLE catalog_chapters ADD COLUMN title_pinyin VARCHAR(200) NOT NULL DEFAULT '';
+ALTER TABLE catalog_bites ADD COLUMN pinyin MEDIUMTEXT NOT NULL DEFAULT ('');

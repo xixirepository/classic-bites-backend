@@ -19,8 +19,8 @@ from import_daehak import CLASSICS_ID, DAEHAK_ID, ImportConflict, import_content
 from migrate_catalog import migrate, seed_classics
 
 
-# Test-only model of the already deployed 003 schema. No other worktree, server,
-# environment file, production migration or production database is involved.
+# The former standalone schema fixture is retained for the missing-column repair
+# case below. Initial setup now uses the integrated additive migration directly.
 READING_SCHEMA_FIXTURE = (
     "ALTER TABLE catalog_works ADD COLUMN title_hanzi VARCHAR(200) NOT NULL DEFAULT ''",
     "ALTER TABLE catalog_works ADD COLUMN title_pinyin VARCHAR(200) NOT NULL DEFAULT ''",
@@ -35,15 +35,8 @@ READING_SCHEMA_FIXTURE = (
 
 
 def migrate_fixture(connect):
+    # The previously independent 003 migration is now part of the main source.
     migrate(connect)
-    connection = connect()
-    try:
-        with connection.cursor() as cursor:
-            for statement in READING_SCHEMA_FIXTURE:
-                cursor.execute(statement)
-        connection.commit()
-    finally:
-        connection.close()
 
 
 def fixture():
